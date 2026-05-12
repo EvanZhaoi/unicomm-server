@@ -4,14 +4,14 @@ UniComm 统一通讯平台后端服务 (Spring Boot).
 
 ## 技术栈
 
-- **Spring Boot 3.4.5** - 核心框架
+- **Spring Boot 4.0.6** - 核心框架
 - **Java 21** - 运行时
 - **Maven** - 构建工具
 - **MySQL 9.x** - 数据库 (driver only, Phase 1 可选)
 - **Redis 8.x** - 缓存/会话存储 (client only, Phase 1 可选)
-- **Sa-Token 1.42.0** - 认证/会话管理 (stateless token 模式)
-- **MyBatis Plus 4.1.3** - ORM 框架
-- **SpringDoc OpenAPI 2.8.4** - API 文档
+- **Sa-Token 1.6.0** - 认证/会话管理 (stateless token 模式)
+- **MyBatis Plus 3.5.16** - ORM 框架
+- **SpringDoc OpenAPI 2.8.17** - API 文档
 
 ## 项目结构
 
