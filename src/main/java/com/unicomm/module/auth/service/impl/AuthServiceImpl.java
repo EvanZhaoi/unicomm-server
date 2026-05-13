@@ -186,8 +186,8 @@ public class AuthServiceImpl implements AuthService {
                 .accessToken(token)
                 .build();
 
-        log.info("用户认证成功: username={}, employeeNo={}, token={}",
-                emp.username, emp.employeeNo, token);
+        log.info("用户认证成功: username={}, employeeNo={}",
+                emp.username, emp.employeeNo);
 
         return response;
     }
