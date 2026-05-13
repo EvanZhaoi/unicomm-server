@@ -35,7 +35,7 @@ src/main/java/com/unicomm/
     │   ├── service/impl/AuthServiceImpl.java
     │   ├── dto/DesktopVerifyRequest.java
     │   ├── dto/DesktopVerifyResponse.java
-    │   └── entity/UniUser.java
+    │   └── UserSnapshot.java
     └── memo/                        # 备忘录模块 (骨架)
         ├── controller/MemoController.java
         └── service/MemoService.java
@@ -107,7 +107,7 @@ Content-Type: application/json
   "code": 200,
   "message": "success",
   "data": {
-    "userId": 10001,
+    "username": "evan.zhao",
     "employeeNo": "E10001",
     "displayName": "Evan Zhao",
     "departmentName": "IT Department",

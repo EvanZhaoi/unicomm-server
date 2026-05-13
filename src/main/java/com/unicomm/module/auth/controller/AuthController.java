@@ -81,7 +81,7 @@ public class AuthController {
      *   "code": 200,
      *   "message": "success",
      *   "data": {
-     *     "userId": 10001,
+     *     "username": "evan.zhao",
      *     "employeeNo": "E10001",
      *     "displayName": "Evan Zhao",
      *     "departmentName": "IT Department",
