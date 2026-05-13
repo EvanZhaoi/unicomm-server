@@ -15,9 +15,16 @@ import java.util.List;
  *
  * <p><strong>响应内容:</strong></p>
  * <ul>
- *   <li>用户基本信息 - id, employeeNo, displayName, departmentName</li>
+ *   <li>用户基本信息 - username, employeeNo, displayName, departmentName, email</li>
  *   <li>权限列表 - 用户被授权的操作列表</li>
  *   <li>访问令牌 - 用于后续请求的身份凭证</li>
+ * </ul>
+ *
+ * <p><strong>重要说明:</strong></p>
+ * <ul>
+ *   <li>使用 username 而非 userId 作为用户标识</li>
+ *   <li>人员真实信息以公司人员接口返回结果为准</li>
+ *   <li> Memo 数据通过 owner_username 进行隔离</li>
  * </ul>
  *
  * @author UniComm Team
@@ -34,20 +41,21 @@ import java.util.List;
 public class DesktopVerifyResponse {
 
     /**
-     * 用户 ID.
+     * Windows 用户名.
      *
-     * <p>用户在 UniComm 系统中的唯一标识。</p>
+     * <p>用于数据隔离和会话关联。</p>
+     * <p>示例: "evan.zhao"</p>
      */
-    @Schema(description = "用户 ID")
-    private Long userId;
+    @Schema(description = "Windows 用户名", example = "evan.zhao")
+    private String username;
 
     /**
-     * 员工编号.
+     * 员工工号.
      *
      * <p>公司内部工号系统中的编号。</p>
      * <p>示例: "E10001"</p>
      */
-    @Schema(description = "员工编号", example = "E10001")
+    @Schema(description = "员工工号", example = "E10001")
     private String employeeNo;
 
     /**
@@ -67,6 +75,15 @@ public class DesktopVerifyResponse {
      */
     @Schema(description = "部门名称", example = "IT Department")
     private String departmentName;
+
+    /**
+     * 邮箱.
+     *
+     * <p>用户的公司邮箱。</p>
+     * <p>示例: "evan.zhao@company.com"</p>
+     */
+    @Schema(description = "邮箱", example = "evan.zhao@company.com")
+    private String email;
 
     /**
      * 权限列表.
