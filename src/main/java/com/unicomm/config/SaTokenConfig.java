@@ -9,23 +9,53 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 /**
  * Sa-Token 配置类.
  *
- * <p>配置桌面端 Token 认证，使用 stateless 模式.</p>
- * <p>Sa-Token 在此项目中作为桌面客户端的会话令牌管理器，
- * 用于验证客户端携带的 Token 而非传统的登录表单认证.</p>
+ * <p>配置桌面端 Token 认证相关的拦截器。</p>
+ *
+ * <p><strong>关于 Sa-Token:</strong></p>
+ * <ul>
+ *   <li>Sa-Token 是轻量级 Java 权限认证框架</li>
+ *   <li>在此项目中作为桌面客户端的会话令牌管理器</li>
+ *   <li>用于验证客户端携带的 Token 而非传统的登录表单认证</li>
+ * </ul>
+ *
+ * <p><strong>认证流程:</strong></p>
+ * <ol>
+ *   <li>桌面客户端通过 {@code /api/v1/auth/desktop/verify} 获取 Token</li>
+ *   <li>客户端在后续请求的 Header 中携带 Token</li>
+ *   <li>Sa-Token 拦截器验证 Token 有效性</li>
+ *   <li>验证通过后可以通过 {@code StpUtil.getLoginId()} 获取当前用户 ID</li>
+ * </ol>
  *
  * @author UniComm Team
  * @version 0.1.0
- * @see <a href="https://sa-token.dev33.cn/">Sa-Token 文档</a>
+ * @since 0.1.0
+ * @see <a href="https://sa-token.dev33.cn/">Sa-Token 官方文档</a>
+ * @see SaInterceptor
+ * @see StpUtil
  */
 @Configuration
 public class SaTokenConfig implements WebMvcConfigurer {
 
     /**
      * 注册 Sa-Token 拦截器.
-     * <p>Phase 1: 暂不启用全局拦截，所有接口公开.
-     * Phase 2+ 将对特定接口启用认证拦截.</p>
+     *
+     * <p><strong>Phase 1:</strong> 暂不启用全局拦截，所有接口公开。</p>
+     * <p><strong>Phase 2+:</strong> 将对特定接口启用认证拦截。</p>
+     *
+     * <p>Phase 2+ 配置示例:</p>
+     * <pre>
+     * registry.addInterceptor(new SaInterceptor(handle -> StpUtil.checkLogin()))
+     *         .addPathPatterns("/api/v1/**")
+     *         .excludePathPatterns(
+     *             "/api/v1/auth/desktop/verify",  // 认证接口无需登录
+     *             "/swagger-ui/**",
+     *             "/v3/api-docs/**"
+     *         );
+     * </pre>
      *
      * @param registry 拦截器注册表
+     * @since 0.1.0
+     * @see SaInterceptor
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
