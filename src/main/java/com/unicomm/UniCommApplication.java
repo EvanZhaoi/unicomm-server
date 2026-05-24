@@ -2,6 +2,7 @@ package com.unicomm;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
 
 /**
  * UniComm 应用启动类.
@@ -18,7 +19,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * @since 0.1.0
  * @see <a href="https://spring.io/projects/spring-boot">Spring Boot</a>
  */
-@SpringBootApplication
+@SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
 public class UniCommApplication {
 
     public static void main(String[] args) {

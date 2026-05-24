@@ -48,7 +48,6 @@ public class DesktopVerifyRequest {
      * <p>示例: "COMPANY", "WORKGROUP"</p>
      */
     @Schema(description = "Windows 域", example = "COMPANY")
-    @NotBlank(message = "域不能为空")
     private String domain;
 
     /**

@@ -1,29 +1,89 @@
 package com.unicomm.module.memo.controller;
 
+import com.unicomm.common.PageResult;
+import com.unicomm.common.Result;
+import com.unicomm.module.memo.dto.MemoDtos.BooleanStateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoCreateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
+import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
+import com.unicomm.module.memo.service.MemoService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * 备忘录控制器 (骨架).
- *
- * <p>Phase 1: 暂不实现业务逻辑，仅保留骨架代码.</p>
- *
- * @author UniComm Team
- * @version 0.1.0
- */
 @RestController
-@RequestMapping("/api/v1/memo")
-@Tag(name = "备忘录模块", description = "备忘录管理接口 (Phase 1 骨架)")
+@RequestMapping("/api/v1/memos")
+@RequiredArgsConstructor
+@Tag(name = "备忘录模块", description = "个人备忘录管理接口")
 public class MemoController {
 
-    /**
-     * 备忘录列表 (待实现).
-     */
-    @RequestMapping("/list")
-    @Operation(summary = "备忘录列表", description = "获取备忘录列表 (待实现)")
-    public String list() {
-        return "Phase 1: Memo module not implemented yet";
+    private final MemoService memoService;
+
+    @GetMapping
+    @Operation(summary = "分页查询 Memo")
+    public Result<PageResult<MemoResponse>> list(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) Long groupId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Boolean isArchived,
+            @RequestParam(required = false) Boolean isFavorite,
+            @RequestParam(required = false) String status) {
+
+        return Result.success(memoService.listMemos(page, size, groupId, keyword, isArchived, isFavorite, status));
+    }
+
+    @GetMapping("/{id}")
+    @Operation(summary = "获取 Memo 详情")
+    public Result<MemoResponse> detail(@PathVariable Long id) {
+        return Result.success(memoService.getMemo(id));
+    }
+
+    @PostMapping
+    @Operation(summary = "创建 Memo")
+    public Result<MemoResponse> create(@Valid @RequestBody MemoCreateRequest request) {
+        return Result.success(memoService.createMemo(request));
+    }
+
+    @PutMapping("/{id}")
+    @Operation(summary = "更新 Memo")
+    public Result<MemoResponse> update(@PathVariable Long id, @Valid @RequestBody MemoUpdateRequest request) {
+        return Result.success(memoService.updateMemo(id, request));
+    }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "删除 Memo")
+    public Result<Void> delete(@PathVariable Long id) {
+        memoService.deleteMemo(id);
+        return Result.success("删除成功", null);
+    }
+
+    @PatchMapping("/{id}/top")
+    @Operation(summary = "置顶或取消置顶")
+    public Result<MemoResponse> top(@PathVariable Long id, @RequestBody BooleanStateRequest request) {
+        return Result.success(memoService.updateTop(id, request));
+    }
+
+    @PatchMapping("/{id}/favorite")
+    @Operation(summary = "收藏或取消收藏")
+    public Result<MemoResponse> favorite(@PathVariable Long id, @RequestBody BooleanStateRequest request) {
+        return Result.success(memoService.updateFavorite(id, request));
+    }
+
+    @PatchMapping("/{id}/archive")
+    @Operation(summary = "归档或取消归档")
+    public Result<MemoResponse> archive(@PathVariable Long id, @RequestBody BooleanStateRequest request) {
+        return Result.success(memoService.updateArchive(id, request));
     }
 }

@@ -112,6 +112,11 @@ public class AuthServiceImpl implements AuthService {
             new EmployeeInfo("evan.zhao", "E10001", "Evan Zhao",
                 "IT Department", "evan.zhao@company.com", "active"));
 
+        // macOS 本机开发用户
+        employeeCache.put("#evanzhao",
+            new EmployeeInfo("evanzhao", "DEV001", "Evan Zhao",
+                "Development", "evanzhao@local.dev", "active"));
+
         // 种子用户 2: Alice Wang - 正常员工
         employeeCache.put("COMPANY#alice.wang",
             new EmployeeInfo("alice.wang", "E10002", "Alice Wang",
