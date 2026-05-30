@@ -7,11 +7,11 @@ UniComm 统一通讯平台后端服务 (Spring Boot).
 - **Spring Boot 4.0.6** - 核心框架
 - **Java 21** - 运行时
 - **Maven** - 构建工具
-- **MySQL 9.x** - 数据库 (driver only, Phase 1 可选)
-- **Redis 8.x** - 缓存/会话存储 (client only, Phase 1 可选)
-- **Sa-Token 1.6.0** - 认证/会话管理 (stateless token 模式)
+- **MySQL 8+/9.x** - 数据库（`mysql` 模式启用）
+- **Redis 8.x** - 缓存/会话存储（后续启用）
+- **Sa-Token 1.45.0** - 认证/会话管理 (stateless token 模式)
 - **MyBatis Plus 3.5.16** - ORM 框架
-- **SpringDoc OpenAPI 2.8.17** - API 文档
+- **SpringDoc OpenAPI 3.0.3** - API 文档
 
 ## 项目结构
 
@@ -36,9 +36,14 @@ src/main/java/com/unicomm/
     │   ├── dto/DesktopVerifyRequest.java
     │   ├── dto/DesktopVerifyResponse.java
     │   └── UserSnapshot.java
-    └── memo/                        # 备忘录模块 (骨架)
+    └── memo/                        # 备忘录模块
         ├── controller/MemoController.java
-        └── service/MemoService.java
+        ├── controller/MemoGroupController.java
+        ├── dto/MemoDtos.java
+        └── service/
+            ├── MemoService.java
+            ├── InMemoryMemoService.java
+            └── JdbcMemoService.java
 ```
 
 ## 快速开始
@@ -63,12 +68,66 @@ mvn spring-boot:run
 
 服务启动后运行在 `http://localhost:28080`
 
-### 运行 (Phase 2+: MySQL + Redis 模式)
+### 运行 (MySQL 持久化模式)
 
-1. 编辑 `src/main/resources/application.yml`，取消数据库和 Redis 配置注释
-2. 执行 SQL 初始化脚本: `sql/schema.sql`
-3. 修改 `unicomm.data-mode: prod`
-4. 运行 `mvn spring-boot:run`
+MySQL 安装完成后执行：
+
+```sql
+CREATE DATABASE IF NOT EXISTS unicomm
+  DEFAULT CHARACTER SET utf8mb4
+  COLLATE utf8mb4_0900_ai_ci;
+```
+
+本地连接信息建议通过环境变量覆盖，避免把密码写入文档或提交历史：
+
+```bash
+export UNICOMM_DB_URL="jdbc:mysql://localhost:3306/unicomm?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+export UNICOMM_DB_USERNAME="root"
+export UNICOMM_DB_PASSWORD="<your-local-password>"
+```
+
+启动 MySQL 模式：
+
+```bash
+mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+```
+
+`application-mysql.yml` 会自动执行 `src/main/resources/db/schema-mysql.sql` 建表脚本。
+
+### Memo API Smoke Test
+
+服务启动后可以用下面脚本快速验证认证、分组、创建、更新、列表流程：
+
+```bash
+node - <<'NODE'
+const base = 'http://localhost:28080/api/v1';
+const headers = { 'content-type': 'application/json' };
+async function req(path, options = {}) {
+  const res = await fetch(base + path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || body?.code !== 200) throw new Error(`${path} -> ${res.status} ${JSON.stringify(body)}`);
+  return body.data;
+}
+const auth = await req('/auth/desktop/verify', {
+  method: 'POST',
+  body: JSON.stringify({ username: 'evanzhao', domain: '', computerName: 'Mac', deviceId: 'dev-device' }),
+});
+const tokenHeaders = { 'unicomm-token': auth.accessToken, Authorization: `Bearer ${auth.accessToken}` };
+const groups = await req('/memo-groups', { headers: tokenHeaders });
+const created = await req('/memos', {
+  method: 'POST',
+  headers: tokenHeaders,
+  body: JSON.stringify({ title: 'Smoke Test Memo', content: 'hello', groupId: groups[0].id, status: 'normal' }),
+});
+const updated = await req(`/memos/${created.id}`, {
+  method: 'PUT',
+  headers: tokenHeaders,
+  body: JSON.stringify({ title: 'Smoke Test Memo Updated', content: 'updated', groupId: groups[0].id, status: 'todo' }),
+});
+const list = await req('/memos?page=1&size=10&isArchived=false', { headers: tokenHeaders });
+console.log({ user: auth.username, groups: groups.length, created: created.id, status: updated.status, list: list.total });
+NODE
+```
 
 ## API 文档
 
@@ -161,7 +220,10 @@ Content-Type: application/json
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
 | server.port | 服务端口 | 28080 |
-| unicomm.data-mode | 数据模式 (dev=内存, prod=数据库) | dev |
+| unicomm.data-mode | 数据模式 (dev=内存, mysql=MySQL 持久化) | dev |
+| unicomm.datasource.url | MySQL JDBC 地址，仅 mysql 模式使用 | application-mysql.yml |
+| unicomm.datasource.username | MySQL 用户名，仅 mysql 模式使用 | root |
+| unicomm.datasource.password | MySQL 密码，仅 mysql 模式使用 | 通过 `UNICOMM_DB_PASSWORD` 覆盖 |
 | sa-token.timeout | Token 有效期 (秒) | 259200 (3天) |
 
 ## License

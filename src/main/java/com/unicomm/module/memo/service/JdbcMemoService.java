@@ -1,0 +1,519 @@
+package com.unicomm.module.memo.service;
+
+import cn.dev33.satoken.stp.StpUtil;
+import com.unicomm.common.BusinessException;
+import com.unicomm.common.PageResult;
+import com.unicomm.common.ResultCode;
+import com.unicomm.module.memo.dto.MemoDtos.BooleanStateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoCreateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoGroupCreateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoGroupResponse;
+import com.unicomm.module.memo.dto.MemoDtos.MemoGroupUpdateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
+import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
+import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+@Service
+@RequiredArgsConstructor
+@ConditionalOnProperty(name = "unicomm.data-mode", havingValue = "mysql")
+public class JdbcMemoService implements MemoService {
+
+    private static final String DEFAULT_GROUP_NAME = "我的备忘";
+    private static final String DEFAULT_GROUP_COLOR = "#6B7280";
+    private static final String DEFAULT_GROUP_ICON = "folder";
+    private static final String DEFAULT_STATUS = "normal";
+    private static final String DEV_FALLBACK_USERNAME = "evan.zhao";
+
+    private final NamedParameterJdbcTemplate jdbcTemplate;
+
+    @Override
+    public PageResult<MemoResponse> listMemos(
+            Integer page,
+            Integer size,
+            Long groupId,
+            String keyword,
+            Boolean isArchived,
+            Boolean isFavorite,
+            String status) {
+
+        String owner = currentUsername();
+        ensureDefaultGroup(owner);
+
+        int safePage = page == null || page < 1 ? 1 : page;
+        int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
+        int offset = (safePage - 1) * safeSize;
+
+        Map<String, Object> params = new HashMap<>();
+        params.put("owner", owner);
+        params.put("limit", safeSize);
+        params.put("offset", offset);
+
+        StringBuilder where = new StringBuilder(" WHERE m.owner_username = :owner AND m.deleted = 0");
+        if (groupId != null) {
+            where.append(" AND m.group_id = :groupId");
+            params.put("groupId", groupId);
+        }
+        if (isArchived != null) {
+            where.append(" AND m.is_archived = :isArchived");
+            params.put("isArchived", isArchived ? 1 : 0);
+        }
+        if (isFavorite != null) {
+            where.append(" AND m.is_favorite = :isFavorite");
+            params.put("isFavorite", isFavorite ? 1 : 0);
+        }
+        if (StringUtils.hasText(status)) {
+            where.append(" AND m.status = :status");
+            params.put("status", status);
+        }
+        if (StringUtils.hasText(keyword)) {
+            where.append(" AND (LOWER(m.title) LIKE :keyword OR LOWER(m.content) LIKE :keyword)");
+            params.put("keyword", "%" + keyword.trim().toLowerCase() + "%");
+        }
+
+        Long total = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM uni_memo m" + where,
+                params,
+                Long.class);
+
+        List<MemoResponse> list = jdbcTemplate.query(
+                """
+                SELECT m.*, g.name AS group_name
+                FROM uni_memo m
+                LEFT JOIN uni_memo_group g ON g.id = m.group_id
+                """ + where + " ORDER BY m.is_top DESC, m.update_time DESC LIMIT :limit OFFSET :offset",
+                params,
+                memoMapper());
+
+        long safeTotal = total == null ? 0 : total;
+        long pages = safeTotal == 0 ? 0 : (safeTotal + safeSize - 1) / safeSize;
+        return PageResult.<MemoResponse>builder()
+                .list(list)
+                .total(safeTotal)
+                .page(safePage)
+                .size(safeSize)
+                .pages(pages)
+                .build();
+    }
+
+    @Override
+    public MemoResponse getMemo(Long id) {
+        String owner = currentUsername();
+        MemoResponse memo = findMemoResponse(id, owner);
+        if (memo == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "Memo 不存在");
+        }
+        return memo;
+    }
+
+    @Override
+    @Transactional
+    public MemoResponse createMemo(MemoCreateRequest request) {
+        String owner = currentUsername();
+        MemoGroupResponse defaultGroup = ensureDefaultGroup(owner);
+        Long groupId = request.getGroupId() == null ? defaultGroup.getId() : request.getGroupId();
+        requireGroupForOwner(groupId, owner);
+
+        LocalDateTime now = LocalDateTime.now();
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(
+                """
+                INSERT INTO uni_memo
+                    (owner_username, title, content, group_id, status, is_top, is_favorite,
+                     is_archived, deleted, create_time, update_time)
+                VALUES
+                    (:owner, :title, :content, :groupId, :status, 0, 0, 0, 0, :createTime, :updateTime)
+                """,
+                new MapSqlParameterSource()
+                        .addValue("owner", owner)
+                        .addValue("title", normalizeTitle(request.getTitle()))
+                        .addValue("content", request.getContent() == null ? "" : request.getContent())
+                        .addValue("groupId", groupId)
+                        .addValue("status", normalizeStatus(request.getStatus()))
+                        .addValue("createTime", now)
+                        .addValue("updateTime", now),
+                keyHolder,
+                new String[]{"id"});
+
+        return getMemo(requiredKey(keyHolder));
+    }
+
+    @Override
+    @Transactional
+    public MemoResponse updateMemo(Long id, MemoUpdateRequest request) {
+        String owner = currentUsername();
+        requireMemoForOwner(id, owner);
+        if (request.getGroupId() != null) {
+            requireGroupForOwner(request.getGroupId(), owner);
+        }
+
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo
+                SET title = :title,
+                    content = :content,
+                    group_id = COALESCE(:groupId, group_id),
+                    status = :status,
+                    update_time = :updateTime
+                WHERE id = :id AND owner_username = :owner AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner)
+                        .addValue("title", normalizeTitle(request.getTitle()))
+                        .addValue("content", request.getContent() == null ? "" : request.getContent())
+                        .addValue("groupId", request.getGroupId())
+                        .addValue("status", normalizeStatus(request.getStatus()))
+                        .addValue("updateTime", LocalDateTime.now()));
+
+        return getMemo(id);
+    }
+
+    @Override
+    @Transactional
+    public void deleteMemo(Long id) {
+        String owner = currentUsername();
+        requireMemoForOwner(id, owner);
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo
+                SET deleted = 1, deleted_time = :deletedTime, update_time = :updateTime
+                WHERE id = :id AND owner_username = :owner AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner)
+                        .addValue("deletedTime", LocalDateTime.now())
+                        .addValue("updateTime", LocalDateTime.now()));
+    }
+
+    @Override
+    public MemoResponse updateTop(Long id, BooleanStateRequest request) {
+        return updateMemoBoolean(id, "is_top", Boolean.TRUE.equals(request.getValue()));
+    }
+
+    @Override
+    public MemoResponse updateFavorite(Long id, BooleanStateRequest request) {
+        return updateMemoBoolean(id, "is_favorite", Boolean.TRUE.equals(request.getValue()));
+    }
+
+    @Override
+    public MemoResponse updateArchive(Long id, BooleanStateRequest request) {
+        return updateMemoBoolean(id, "is_archived", Boolean.TRUE.equals(request.getValue()));
+    }
+
+    @Override
+    public List<MemoGroupResponse> listGroups() {
+        String owner = currentUsername();
+        ensureDefaultGroup(owner);
+        return jdbcTemplate.query(
+                """
+                SELECT g.*,
+                       (SELECT COUNT(*) FROM uni_memo m
+                        WHERE m.owner_username = g.owner_username
+                          AND m.group_id = g.id
+                          AND m.deleted = 0) AS memo_count
+                FROM uni_memo_group g
+                WHERE g.owner_username = :owner AND g.deleted = 0
+                ORDER BY g.sort_order ASC, g.id ASC
+                """,
+                Map.of("owner", owner),
+                groupMapper());
+    }
+
+    @Override
+    @Transactional
+    public MemoGroupResponse createGroup(MemoGroupCreateRequest request) {
+        String owner = currentUsername();
+        ensureDefaultGroup(owner);
+        LocalDateTime now = LocalDateTime.now();
+
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(
+                """
+                INSERT INTO uni_memo_group
+                    (owner_username, name, color, icon, sort_order, is_default, deleted, create_time, update_time)
+                VALUES
+                    (:owner, :name, :color, :icon, :sortOrder, 0, 0, :createTime, :updateTime)
+                """,
+                new MapSqlParameterSource()
+                        .addValue("owner", owner)
+                        .addValue("name", request.getName().trim())
+                        .addValue("color", normalizeColor(request.getColor()))
+                        .addValue("icon", normalizeIcon(request.getIcon()))
+                        .addValue("sortOrder", nextSortOrder(owner))
+                        .addValue("createTime", now)
+                        .addValue("updateTime", now),
+                keyHolder,
+                new String[]{"id"});
+
+        return requireGroupForOwner(requiredKey(keyHolder), owner);
+    }
+
+    @Override
+    @Transactional
+    public MemoGroupResponse updateGroup(Long id, MemoGroupUpdateRequest request) {
+        String owner = currentUsername();
+        requireGroupForOwner(id, owner);
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo_group
+                SET name = :name,
+                    color = :color,
+                    icon = :icon,
+                    sort_order = COALESCE(:sortOrder, sort_order),
+                    update_time = :updateTime
+                WHERE id = :id AND owner_username = :owner AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner)
+                        .addValue("name", request.getName().trim())
+                        .addValue("color", normalizeColor(request.getColor()))
+                        .addValue("icon", normalizeIcon(request.getIcon()))
+                        .addValue("sortOrder", request.getSortOrder())
+                        .addValue("updateTime", LocalDateTime.now()));
+
+        return requireGroupForOwner(id, owner);
+    }
+
+    @Override
+    @Transactional
+    public void deleteGroup(Long id) {
+        String owner = currentUsername();
+        MemoGroupResponse group = requireGroupForOwner(id, owner);
+        if (Boolean.TRUE.equals(group.getIsDefault())) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "默认分组不可删除");
+        }
+
+        MemoGroupResponse defaultGroup = ensureDefaultGroup(owner);
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo
+                SET group_id = :defaultGroupId, update_time = :updateTime
+                WHERE owner_username = :owner AND group_id = :groupId AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("defaultGroupId", defaultGroup.getId())
+                        .addValue("updateTime", LocalDateTime.now())
+                        .addValue("owner", owner)
+                        .addValue("groupId", group.getId()));
+
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo_group
+                SET deleted = 1, update_time = :updateTime
+                WHERE id = :id AND owner_username = :owner AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner)
+                        .addValue("updateTime", LocalDateTime.now()));
+    }
+
+    private MemoResponse updateMemoBoolean(Long id, String column, boolean value) {
+        String owner = currentUsername();
+        requireMemoForOwner(id, owner);
+        jdbcTemplate.update(
+                "UPDATE uni_memo SET " + column + " = :value, update_time = :updateTime "
+                        + "WHERE id = :id AND owner_username = :owner AND deleted = 0",
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner)
+                        .addValue("value", value ? 1 : 0)
+                        .addValue("updateTime", LocalDateTime.now()));
+        return getMemo(id);
+    }
+
+    private MemoResponse findMemoResponse(Long id, String owner) {
+        List<MemoResponse> list = jdbcTemplate.query(
+                """
+                SELECT m.*, g.name AS group_name
+                FROM uni_memo m
+                LEFT JOIN uni_memo_group g ON g.id = m.group_id
+                WHERE m.id = :id AND m.owner_username = :owner AND m.deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner),
+                memoMapper());
+        return list.isEmpty() ? null : list.getFirst();
+    }
+
+    private void requireMemoForOwner(Long id, String owner) {
+        if (id == null || findMemoResponse(id, owner) == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "Memo 不存在");
+        }
+    }
+
+    private MemoGroupResponse requireGroupForOwner(Long groupId, String owner) {
+        if (groupId == null) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "分组 ID 不能为空");
+        }
+
+        List<MemoGroupResponse> list = jdbcTemplate.query(
+                """
+                SELECT g.*,
+                       (SELECT COUNT(*) FROM uni_memo m
+                        WHERE m.owner_username = g.owner_username
+                          AND m.group_id = g.id
+                          AND m.deleted = 0) AS memo_count
+                FROM uni_memo_group g
+                WHERE g.id = :id AND g.owner_username = :owner AND g.deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", groupId)
+                        .addValue("owner", owner),
+                groupMapper());
+
+        if (list.isEmpty()) {
+            throw new BusinessException(ResultCode.BAD_REQUEST, "分组不存在");
+        }
+        return list.getFirst();
+    }
+
+    private MemoGroupResponse ensureDefaultGroup(String owner) {
+        List<MemoGroupResponse> exists = jdbcTemplate.query(
+                """
+                SELECT g.*,
+                       (SELECT COUNT(*) FROM uni_memo m
+                        WHERE m.owner_username = g.owner_username
+                          AND m.group_id = g.id
+                          AND m.deleted = 0) AS memo_count
+                FROM uni_memo_group g
+                WHERE g.owner_username = :owner AND g.is_default = 1 AND g.deleted = 0
+                ORDER BY g.id ASC
+                LIMIT 1
+                """,
+                Map.of("owner", owner),
+                groupMapper());
+
+        if (!exists.isEmpty()) {
+            return exists.getFirst();
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(
+                """
+                INSERT INTO uni_memo_group
+                    (owner_username, name, color, icon, sort_order, is_default, deleted, create_time, update_time)
+                VALUES
+                    (:owner, :name, :color, :icon, 0, 1, 0, :createTime, :updateTime)
+                """,
+                new MapSqlParameterSource()
+                        .addValue("owner", owner)
+                        .addValue("name", DEFAULT_GROUP_NAME)
+                        .addValue("color", DEFAULT_GROUP_COLOR)
+                        .addValue("icon", DEFAULT_GROUP_ICON)
+                        .addValue("createTime", now)
+                        .addValue("updateTime", now),
+                keyHolder,
+                new String[]{"id"});
+
+        return requireGroupForOwner(requiredKey(keyHolder), owner);
+    }
+
+    private int nextSortOrder(String owner) {
+        Integer maxSort = jdbcTemplate.queryForObject(
+                """
+                SELECT COALESCE(MAX(sort_order), 0)
+                FROM uni_memo_group
+                WHERE owner_username = :owner AND deleted = 0
+                """,
+                Map.of("owner", owner),
+                Integer.class);
+        return (maxSort == null ? 0 : maxSort) + 10;
+    }
+
+    private String normalizeTitle(String title) {
+        if (!StringUtils.hasText(title)) {
+            return "无标题";
+        }
+        return title.trim();
+    }
+
+    private String normalizeStatus(String status) {
+        if (!StringUtils.hasText(status)) {
+            return DEFAULT_STATUS;
+        }
+        return switch (status) {
+            case "normal", "todo", "done" -> status;
+            default -> throw new BusinessException(ResultCode.BAD_REQUEST, "Memo 状态不合法");
+        };
+    }
+
+    private String normalizeColor(String color) {
+        return StringUtils.hasText(color) ? color.trim() : DEFAULT_GROUP_COLOR;
+    }
+
+    private String normalizeIcon(String icon) {
+        return StringUtils.hasText(icon) ? icon.trim() : DEFAULT_GROUP_ICON;
+    }
+
+    private String currentUsername() {
+        if (StpUtil.isLogin()) {
+            return StpUtil.getLoginIdAsString();
+        }
+        return DEV_FALLBACK_USERNAME;
+    }
+
+    private long requiredKey(KeyHolder keyHolder) {
+        Number key = keyHolder.getKey();
+        if (key == null) {
+            throw new BusinessException(ResultCode.INTERNAL_SERVER_ERROR, "数据库未返回主键");
+        }
+        return key.longValue();
+    }
+
+    private RowMapper<MemoResponse> memoMapper() {
+        return (rs, rowNum) -> MemoResponse.builder()
+                .id(rs.getLong("id"))
+                .title(rs.getString("title"))
+                .content(rs.getString("content"))
+                .groupId(rs.getLong("group_id"))
+                .groupName(rs.getString("group_name"))
+                .status(rs.getString("status"))
+                .isTop(rs.getBoolean("is_top"))
+                .isFavorite(rs.getBoolean("is_favorite"))
+                .isArchived(rs.getBoolean("is_archived"))
+                .createTime(toLocalDateTime(rs, "create_time"))
+                .updateTime(toLocalDateTime(rs, "update_time"))
+                .build();
+    }
+
+    private RowMapper<MemoGroupResponse> groupMapper() {
+        return (rs, rowNum) -> MemoGroupResponse.builder()
+                .id(rs.getLong("id"))
+                .name(rs.getString("name"))
+                .color(rs.getString("color"))
+                .icon(rs.getString("icon"))
+                .sortOrder(rs.getInt("sort_order"))
+                .isDefault(rs.getBoolean("is_default"))
+                .memoCount(rs.getLong("memo_count"))
+                .createTime(toLocalDateTime(rs, "create_time"))
+                .updateTime(toLocalDateTime(rs, "update_time"))
+                .build();
+    }
+
+    private LocalDateTime toLocalDateTime(ResultSet rs, String column) throws SQLException {
+        Timestamp timestamp = rs.getTimestamp(column);
+        return timestamp == null ? null : timestamp.toLocalDateTime();
+    }
+}

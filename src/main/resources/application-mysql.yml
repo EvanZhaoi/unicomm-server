@@ -1,0 +1,14 @@
+spring:
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema-mysql.sql
+      encoding: UTF-8
+
+unicomm:
+  data-mode: mysql
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${UNICOMM_DB_URL:jdbc:mysql://localhost:3306/unicomm?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${UNICOMM_DB_USERNAME:root}
+    password: ${UNICOMM_DB_PASSWORD:}

@@ -5,13 +5,6 @@ spring:
   application:
     name: unicomm-server
 
-  # MySQL 配置 (Phase 1 使用内存模拟，生产环境取消注释)
-  # datasource:
-  #   url: jdbc:mysql://localhost:3306/unicomm?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
-  #   username: root
-  #   password: your_password
-  #   driver-class-name: com.mysql.cj.jdbc.Driver
-
   # Redis 配置 (Phase 1 使用内存模拟，生产环境取消注释)
   # redis:
   #   host: localhost
@@ -19,20 +12,20 @@ spring:
   #   password: your_password
   #   database: 0
 
-  # SpringDoc OpenAPI
-  springdoc:
-    api-docs:
-      enabled: true
-    swagger-ui:
-      enabled: true
-      path: /swagger-ui.html
-      tags-sorter: alpha
-      operations-sorter: alpha
-
   # Jackson 配置
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
+
+# SpringDoc OpenAPI
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
 
 # MyBatis Plus 配置
 mybatis-plus:
@@ -50,7 +43,7 @@ mybatis-plus:
 
 # 通用配置
 unicomm:
-  # 数据初始化模式 (dev=内存初始化, prod=数据库)
+  # 数据模式: dev=内存模式; mysql=MySQL 持久化模式
   data-mode: dev
 
 # Sa-Token 配置
