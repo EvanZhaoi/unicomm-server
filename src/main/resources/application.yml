@@ -11,7 +11,7 @@ spring:
       schema-locations: classpath:db/schema-mysql.sql
       encoding: UTF-8
 
-  # Redis 配置 (Phase 1 使用内存模拟，生产环境取消注释)
+  # Redis 配置（后续需要集中缓存或会话存储时启用）
   # redis:
   #   host: localhost
   #   port: 6379

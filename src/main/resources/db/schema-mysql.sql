@@ -5,39 +5,39 @@ CREATE DATABASE IF NOT EXISTS unicomm
 USE unicomm;
 
 CREATE TABLE IF NOT EXISTS uni_memo_group (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    owner_username VARCHAR(100) NOT NULL,
-    name VARCHAR(50) NOT NULL,
-    color VARCHAR(32) NOT NULL DEFAULT '#6B7280',
-    icon VARCHAR(64) NOT NULL DEFAULT 'folder',
-    sort_order INT NOT NULL DEFAULT 0,
-    is_default TINYINT(1) NOT NULL DEFAULT 0,
-    deleted TINYINT(1) NOT NULL DEFAULT 0,
-    create_time DATETIME NOT NULL,
-    update_time DATETIME NOT NULL,
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    owner_username VARCHAR(100) NOT NULL COMMENT '所有者用户名，用于用户数据隔离',
+    name VARCHAR(50) NOT NULL COMMENT '分组名称',
+    color VARCHAR(32) NOT NULL DEFAULT '#6B7280' COMMENT '分组颜色，HEX 或主题色标识',
+    icon VARCHAR(64) NOT NULL DEFAULT 'folder' COMMENT '分组图标名称',
+    sort_order INT NOT NULL DEFAULT 0 COMMENT '排序值，越小越靠前',
+    is_default TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否默认分组：0=否，1=是',
+    deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0=未删除，1=已删除',
+    create_time DATETIME NOT NULL COMMENT '创建时间',
+    update_time DATETIME NOT NULL COMMENT '更新时间',
     PRIMARY KEY (id),
     KEY idx_memo_group_owner (owner_username, deleted, sort_order),
     KEY idx_memo_group_default (owner_username, is_default, deleted)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 分组表';
 
 CREATE TABLE IF NOT EXISTS uni_memo (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    owner_username VARCHAR(100) NOT NULL,
-    title VARCHAR(200) NOT NULL,
-    content TEXT NULL,
-    group_id BIGINT NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'normal',
-    is_top TINYINT(1) NOT NULL DEFAULT 0,
-    is_favorite TINYINT(1) NOT NULL DEFAULT 0,
-    is_archived TINYINT(1) NOT NULL DEFAULT 0,
-    deleted TINYINT(1) NOT NULL DEFAULT 0,
-    create_time DATETIME NOT NULL,
-    update_time DATETIME NOT NULL,
-    deleted_time DATETIME NULL,
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    owner_username VARCHAR(100) NOT NULL COMMENT '所有者用户名，用于用户数据隔离',
+    title VARCHAR(200) NOT NULL COMMENT 'Memo 标题',
+    content TEXT NULL COMMENT 'Memo 正文内容',
+    group_id BIGINT NOT NULL COMMENT '所属分组ID',
+    status VARCHAR(20) NOT NULL DEFAULT 'normal' COMMENT '状态：normal=普通，todo=待办，done=完成',
+    is_top TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否置顶：0=否，1=是',
+    is_favorite TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否收藏：0=否，1=是',
+    is_archived TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否归档：0=否，1=是',
+    deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0=未删除，1=已删除',
+    create_time DATETIME NOT NULL COMMENT '创建时间',
+    update_time DATETIME NOT NULL COMMENT '更新时间',
+    deleted_time DATETIME NULL COMMENT '删除时间',
     PRIMARY KEY (id),
     KEY idx_memo_owner_list (owner_username, deleted, is_archived, is_top, update_time),
     KEY idx_memo_owner_group (owner_username, group_id, deleted),
     KEY idx_memo_owner_favorite (owner_username, is_favorite, deleted),
     CONSTRAINT fk_uni_memo_group
         FOREIGN KEY (group_id) REFERENCES uni_memo_group (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 主表';

@@ -34,10 +34,25 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class JdbcMemoService implements MemoService {
 
+    /*
+     * 当前 Memo 模块只保留 MySQL 持久化实现。
+     *
+     * 设计约束：
+     * 1. 所有业务数据必须带 owner_username，查询和写入都必须按当前登录用户隔离。
+     * 2. 删除采用逻辑删除，避免误删后无法恢复，也便于后续做回收站。
+     * 3. 写操作完成后发布 WebSocket 事件，桌面端没有刷新按钮，依赖事件触发重新拉取。
+     * 4. 使用 NamedParameterJdbcTemplate 是为了让 SQL 字段和业务含义更直接，当前阶段不引入 ORM。
+     */
     private static final String DEFAULT_GROUP_NAME = "我的备忘";
     private static final String DEFAULT_GROUP_COLOR = "#6B7280";
     private static final String DEFAULT_GROUP_ICON = "folder";
     private static final String DEFAULT_STATUS = "normal";
+
+    /*
+     * 认证拦截器目前还没有强制保护所有 Memo 接口。保留一个本地兜底用户，
+     * 让接口文档和本机联调在没有 Token 的情况下仍可跑通。
+     * 等后续开启全局鉴权后，这个兜底值应移除。
+     */
     private static final String DEV_FALLBACK_USERNAME = "evan.zhao";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
@@ -56,6 +71,7 @@ public class JdbcMemoService implements MemoService {
         String owner = currentUsername();
         ensureDefaultGroup(owner);
 
+        // API 参数只作为请求意图，进入 SQL 前统一做边界保护，避免负分页或过大分页拖垮列表查询。
         int safePage = page == null || page < 1 ? 1 : page;
         int safeSize = size == null || size < 1 ? 20 : Math.min(size, 100);
         int offset = (safePage - 1) * safeSize;
@@ -65,6 +81,7 @@ public class JdbcMemoService implements MemoService {
         params.put("limit", safeSize);
         params.put("offset", offset);
 
+        // 统一拼接 WHERE，count 查询和列表查询共用同一组过滤条件，避免分页总数和列表内容不一致。
         StringBuilder where = new StringBuilder(" WHERE m.owner_username = :owner AND m.deleted = 0");
         if (groupId != null) {
             where.append(" AND m.group_id = :groupId");
@@ -128,6 +145,8 @@ public class JdbcMemoService implements MemoService {
         String owner = currentUsername();
         MemoGroupResponse defaultGroup = ensureDefaultGroup(owner);
         Long groupId = request.getGroupId() == null ? defaultGroup.getId() : request.getGroupId();
+
+        // group_id 是跨表引用，写入前必须确认该分组属于当前用户，不能让客户端传入别人的分组 ID。
         requireGroupForOwner(groupId, owner);
 
         LocalDateTime now = LocalDateTime.now();
@@ -152,6 +171,8 @@ public class JdbcMemoService implements MemoService {
                 new String[]{"id"});
 
         MemoResponse memo = getMemo(requiredKey(keyHolder));
+
+        // 创建 Memo 会影响列表和分组计数，所以同时广播 memo.created 和 group.updated。
         realtimePublisher.publishMemoChanged(owner, "memo.created", memo.getId(), memo.getGroupId());
         realtimePublisher.publishGroupChanged(owner, "group.updated", memo.getGroupId());
         return memo;
@@ -163,6 +184,7 @@ public class JdbcMemoService implements MemoService {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
         if (request.getGroupId() != null) {
+            // 分组为空表示不调整分组；分组不为空时仍然必须校验归属。
             requireGroupForOwner(request.getGroupId(), owner);
         }
 
@@ -314,6 +336,8 @@ public class JdbcMemoService implements MemoService {
         }
 
         MemoGroupResponse defaultGroup = ensureDefaultGroup(owner);
+
+        // 删除分组前先把该分组下的 Memo 移回默认分组，避免出现悬空 group_id。
         jdbcTemplate.update(
                 """
                 UPDATE uni_memo
@@ -342,6 +366,8 @@ public class JdbcMemoService implements MemoService {
     private MemoResponse updateMemoBoolean(Long id, String column, boolean value) {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
+
+        // column 只由 updateTop/updateFavorite/updateArchive 三个内部方法传入，避免外部输入拼接 SQL。
         jdbcTemplate.update(
                 "UPDATE uni_memo SET " + column + " = :value, update_time = :updateTime "
                         + "WHERE id = :id AND owner_username = :owner AND deleted = 0",
@@ -403,6 +429,7 @@ public class JdbcMemoService implements MemoService {
     }
 
     private MemoGroupResponse ensureDefaultGroup(String owner) {
+        // 默认分组是用户首次使用 Memo 的基础数据。这里采用惰性创建，避免额外初始化流程。
         List<MemoGroupResponse> exists = jdbcTemplate.query(
                 """
                 SELECT g.*,
@@ -445,6 +472,7 @@ public class JdbcMemoService implements MemoService {
     }
 
     private int nextSortOrder(String owner) {
+        // sort_order 按 10 递增，后续如果支持拖拽排序，可以在两个相邻值中插入新值。
         Integer maxSort = jdbcTemplate.queryForObject(
                 """
                 SELECT COALESCE(MAX(sort_order), 0)
@@ -485,6 +513,8 @@ public class JdbcMemoService implements MemoService {
         if (StpUtil.isLogin()) {
             return StpUtil.getLoginIdAsString();
         }
+
+        // 临时联调用：正式开启 Memo 接口鉴权后，未登录请求应在拦截器层被拒绝。
         return DEV_FALLBACK_USERNAME;
     }
 
@@ -497,6 +527,7 @@ public class JdbcMemoService implements MemoService {
     }
 
     private RowMapper<MemoResponse> memoMapper() {
+        // RowMapper 是数据库行到 API 响应 DTO 的唯一转换点，避免 SQL 字段名泄漏到 controller。
         return (rs, rowNum) -> MemoResponse.builder()
                 .id(rs.getLong("id"))
                 .title(rs.getString("title"))
@@ -513,6 +544,7 @@ public class JdbcMemoService implements MemoService {
     }
 
     private RowMapper<MemoGroupResponse> groupMapper() {
+        // memo_count 来自查询里的子查询别名，调用方无需再次查询分组下 Memo 数量。
         return (rs, rowNum) -> MemoGroupResponse.builder()
                 .id(rs.getLong("id"))
                 .name(rs.getString("name"))
