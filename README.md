@@ -12,6 +12,7 @@ UniComm 统一通讯平台后端服务 (Spring Boot).
 - **Sa-Token 1.45.0** - 认证/会话管理 (stateless token 模式)
 - **MyBatis Plus 3.5.16** - ORM 框架
 - **SpringDoc OpenAPI 3.0.3** - API 文档
+- **WebSocket** - Memo 实时变更事件推送
 
 ## 项目结构
 
@@ -128,6 +129,23 @@ const list = await req('/memos?page=1&size=10&isArchived=false', { headers: toke
 console.log({ user: auth.username, groups: groups.length, created: created.id, status: updated.status, list: list.total });
 NODE
 ```
+
+### WebSocket Smoke Test
+
+服务启动后可连接 `ws://localhost:28080/ws`。Memo 写操作会广播事件，例如：
+
+```json
+{
+  "module": "memo",
+  "type": "memo.created",
+  "ownerUsername": "evan.zhao",
+  "memoId": 1,
+  "groupId": 1,
+  "occurredAt": "2026-05-30T16:58:51"
+}
+```
+
+当前事件类型包括 `memo.created`、`memo.updated`、`memo.deleted`、`group.created`、`group.updated`、`group.deleted`。
 
 ## API 文档
 

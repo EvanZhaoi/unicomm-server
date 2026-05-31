@@ -11,7 +11,9 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoGroupResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
+import com.unicomm.module.memo.realtime.MemoRealtimePublisher;
 import lombok.Data;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -28,6 +30,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 @ConditionalOnProperty(name = "unicomm.data-mode", havingValue = "dev", matchIfMissing = true)
 public class InMemoryMemoService implements MemoService {
 
@@ -36,6 +39,8 @@ public class InMemoryMemoService implements MemoService {
     private static final String DEFAULT_GROUP_ICON = "folder";
     private static final String DEFAULT_STATUS = "normal";
     private static final String DEV_FALLBACK_USERNAME = "evan.zhao";
+
+    private final MemoRealtimePublisher realtimePublisher;
 
     private final AtomicLong memoIdGenerator = new AtomicLong(1);
     private final AtomicLong groupIdGenerator = new AtomicLong(1);
@@ -112,7 +117,10 @@ public class InMemoryMemoService implements MemoService {
         memo.setUpdateTime(now);
 
         memos.put(memo.getId(), memo);
-        return toMemoResponse(memo);
+        MemoResponse response = toMemoResponse(memo);
+        realtimePublisher.publishMemoChanged(owner, "memo.created", response.getId(), response.getGroupId());
+        realtimePublisher.publishGroupChanged(owner, "group.updated", response.getGroupId());
+        return response;
     }
 
     public MemoResponse updateMemo(Long id, MemoUpdateRequest request) {
@@ -127,7 +135,9 @@ public class InMemoryMemoService implements MemoService {
         memo.setStatus(normalizeStatus(request.getStatus()));
         memo.setUpdateTime(LocalDateTime.now());
 
-        return toMemoResponse(memo);
+        MemoResponse response = toMemoResponse(memo);
+        realtimePublisher.publishMemoChanged(memo.getOwnerUsername(), "memo.updated", response.getId(), response.getGroupId());
+        return response;
     }
 
     public void deleteMemo(Long id) {
@@ -135,27 +145,36 @@ public class InMemoryMemoService implements MemoService {
         memo.setDeleted(true);
         memo.setDeletedTime(LocalDateTime.now());
         memo.setUpdateTime(LocalDateTime.now());
+        realtimePublisher.publishMemoChanged(memo.getOwnerUsername(), "memo.deleted", memo.getId(), memo.getGroupId());
+        realtimePublisher.publishGroupChanged(memo.getOwnerUsername(), "group.updated", memo.getGroupId());
     }
 
     public MemoResponse updateTop(Long id, BooleanStateRequest request) {
         MemoRecord memo = requireMemo(id);
         memo.setTop(Boolean.TRUE.equals(request.getValue()));
         memo.setUpdateTime(LocalDateTime.now());
-        return toMemoResponse(memo);
+        MemoResponse response = toMemoResponse(memo);
+        realtimePublisher.publishMemoChanged(memo.getOwnerUsername(), "memo.updated", response.getId(), response.getGroupId());
+        return response;
     }
 
     public MemoResponse updateFavorite(Long id, BooleanStateRequest request) {
         MemoRecord memo = requireMemo(id);
         memo.setFavorite(Boolean.TRUE.equals(request.getValue()));
         memo.setUpdateTime(LocalDateTime.now());
-        return toMemoResponse(memo);
+        MemoResponse response = toMemoResponse(memo);
+        realtimePublisher.publishMemoChanged(memo.getOwnerUsername(), "memo.updated", response.getId(), response.getGroupId());
+        return response;
     }
 
     public MemoResponse updateArchive(Long id, BooleanStateRequest request) {
         MemoRecord memo = requireMemo(id);
         memo.setArchived(Boolean.TRUE.equals(request.getValue()));
         memo.setUpdateTime(LocalDateTime.now());
-        return toMemoResponse(memo);
+        MemoResponse response = toMemoResponse(memo);
+        realtimePublisher.publishMemoChanged(memo.getOwnerUsername(), "memo.updated", response.getId(), response.getGroupId());
+        realtimePublisher.publishGroupChanged(memo.getOwnerUsername(), "group.updated", response.getGroupId());
+        return response;
     }
 
     public List<MemoGroupResponse> listGroups() {
@@ -188,7 +207,9 @@ public class InMemoryMemoService implements MemoService {
         group.setUpdateTime(now);
 
         groups.put(group.getId(), group);
-        return toGroupResponse(group);
+        MemoGroupResponse response = toGroupResponse(group);
+        realtimePublisher.publishGroupChanged(owner, "group.created", response.getId());
+        return response;
     }
 
     public MemoGroupResponse updateGroup(Long id, MemoGroupUpdateRequest request) {
@@ -200,7 +221,9 @@ public class InMemoryMemoService implements MemoService {
             group.setSortOrder(request.getSortOrder());
         }
         group.setUpdateTime(LocalDateTime.now());
-        return toGroupResponse(group);
+        MemoGroupResponse response = toGroupResponse(group);
+        realtimePublisher.publishGroupChanged(group.getOwnerUsername(), "group.updated", response.getId());
+        return response;
     }
 
     public void deleteGroup(Long id) {
@@ -220,6 +243,7 @@ public class InMemoryMemoService implements MemoService {
 
         group.setDeleted(true);
         group.setUpdateTime(LocalDateTime.now());
+        realtimePublisher.publishGroupChanged(group.getOwnerUsername(), "group.deleted", group.getId());
     }
 
     private MemoRecord requireMemo(Long id) {

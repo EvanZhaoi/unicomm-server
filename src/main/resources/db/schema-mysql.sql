@@ -1,3 +1,9 @@
+CREATE DATABASE IF NOT EXISTS unicomm
+    DEFAULT CHARACTER SET utf8mb4
+    DEFAULT COLLATE utf8mb4_0900_ai_ci;
+
+USE unicomm;
+
 CREATE TABLE IF NOT EXISTS uni_memo_group (
     id BIGINT NOT NULL AUTO_INCREMENT,
     owner_username VARCHAR(100) NOT NULL,

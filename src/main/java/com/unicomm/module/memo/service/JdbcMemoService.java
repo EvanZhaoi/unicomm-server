@@ -11,6 +11,7 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoGroupResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
+import com.unicomm.module.memo.realtime.MemoRealtimePublisher;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.RowMapper;
@@ -42,6 +43,7 @@ public class JdbcMemoService implements MemoService {
     private static final String DEV_FALLBACK_USERNAME = "evan.zhao";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
+    private final MemoRealtimePublisher realtimePublisher;
 
     @Override
     public PageResult<MemoResponse> listMemos(
@@ -151,7 +153,10 @@ public class JdbcMemoService implements MemoService {
                 keyHolder,
                 new String[]{"id"});
 
-        return getMemo(requiredKey(keyHolder));
+        MemoResponse memo = getMemo(requiredKey(keyHolder));
+        realtimePublisher.publishMemoChanged(owner, "memo.created", memo.getId(), memo.getGroupId());
+        realtimePublisher.publishGroupChanged(owner, "group.updated", memo.getGroupId());
+        return memo;
     }
 
     @Override
@@ -182,7 +187,9 @@ public class JdbcMemoService implements MemoService {
                         .addValue("status", normalizeStatus(request.getStatus()))
                         .addValue("updateTime", LocalDateTime.now()));
 
-        return getMemo(id);
+        MemoResponse memo = getMemo(id);
+        realtimePublisher.publishMemoChanged(owner, "memo.updated", memo.getId(), memo.getGroupId());
+        return memo;
     }
 
     @Override
@@ -201,6 +208,8 @@ public class JdbcMemoService implements MemoService {
                         .addValue("owner", owner)
                         .addValue("deletedTime", LocalDateTime.now())
                         .addValue("updateTime", LocalDateTime.now()));
+        realtimePublisher.publishMemoChanged(owner, "memo.deleted", id, null);
+        realtimePublisher.publishGroupChanged(owner, "group.updated", null);
     }
 
     @Override
@@ -263,7 +272,9 @@ public class JdbcMemoService implements MemoService {
                 keyHolder,
                 new String[]{"id"});
 
-        return requireGroupForOwner(requiredKey(keyHolder), owner);
+        MemoGroupResponse group = requireGroupForOwner(requiredKey(keyHolder), owner);
+        realtimePublisher.publishGroupChanged(owner, "group.created", group.getId());
+        return group;
     }
 
     @Override
@@ -290,7 +301,9 @@ public class JdbcMemoService implements MemoService {
                         .addValue("sortOrder", request.getSortOrder())
                         .addValue("updateTime", LocalDateTime.now()));
 
-        return requireGroupForOwner(id, owner);
+        MemoGroupResponse group = requireGroupForOwner(id, owner);
+        realtimePublisher.publishGroupChanged(owner, "group.updated", group.getId());
+        return group;
     }
 
     @Override
@@ -325,6 +338,7 @@ public class JdbcMemoService implements MemoService {
                         .addValue("id", id)
                         .addValue("owner", owner)
                         .addValue("updateTime", LocalDateTime.now()));
+        realtimePublisher.publishGroupChanged(owner, "group.deleted", id);
     }
 
     private MemoResponse updateMemoBoolean(Long id, String column, boolean value) {
@@ -338,7 +352,9 @@ public class JdbcMemoService implements MemoService {
                         .addValue("owner", owner)
                         .addValue("value", value ? 1 : 0)
                         .addValue("updateTime", LocalDateTime.now()));
-        return getMemo(id);
+        MemoResponse memo = getMemo(id);
+        realtimePublisher.publishMemoChanged(owner, "memo.updated", memo.getId(), memo.getGroupId());
+        return memo;
     }
 
     private MemoResponse findMemoResponse(Long id, String owner) {
