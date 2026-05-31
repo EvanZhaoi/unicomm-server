@@ -7,10 +7,10 @@ UniComm 统一通讯平台后端服务 (Spring Boot).
 - **Spring Boot 4.0.6** - 核心框架
 - **Java 21** - 运行时
 - **Maven** - 构建工具
-- **MySQL 8+/9.x** - 数据库（`mysql` 模式启用）
+- **MySQL 8+/9.x** - 数据库
 - **Redis 8.x** - 缓存/会话存储（后续启用）
 - **Sa-Token 1.45.0** - 认证/会话管理 (stateless token 模式)
-- **MyBatis Plus 3.5.16** - ORM 框架
+- **Spring JDBC** - 数据访问
 - **SpringDoc OpenAPI 3.0.3** - API 文档
 - **WebSocket** - Memo 实时变更事件推送
 
@@ -21,7 +21,6 @@ src/main/java/com/unicomm/
 ├── UniCommApplication.java          # 启动类
 ├── config/                          # 配置类
 │   ├── SaTokenConfig.java           # Sa-Token 配置
-│   ├── MybatisPlusConfig.java       # MyBatis Plus 配置
 │   ├── CorsConfig.java              # 跨域配置
 │   └── OpenApiConfig.java           # OpenAPI 文档配置
 ├── common/                          # 通用模块
@@ -36,14 +35,12 @@ src/main/java/com/unicomm/
     │   ├── service/impl/AuthServiceImpl.java
     │   ├── dto/DesktopVerifyRequest.java
     │   ├── dto/DesktopVerifyResponse.java
-    │   └── UserSnapshot.java
     └── memo/                        # 备忘录模块
         ├── controller/MemoController.java
         ├── controller/MemoGroupController.java
         ├── dto/MemoDtos.java
         └── service/
             ├── MemoService.java
-            ├── InMemoryMemoService.java
             └── JdbcMemoService.java
 ```
 
@@ -61,22 +58,12 @@ cd ~/Project/unicomm-server
 mvn clean compile
 ```
 
-### 运行 (Phase 1: 内存模式)
+### 运行
+
+MySQL 安装完成后，可以直接执行初始化脚本创建数据库和表：
 
 ```bash
-mvn spring-boot:run
-```
-
-服务启动后运行在 `http://localhost:28080`
-
-### 运行 (MySQL 持久化模式)
-
-MySQL 安装完成后执行：
-
-```sql
-CREATE DATABASE IF NOT EXISTS unicomm
-  DEFAULT CHARACTER SET utf8mb4
-  COLLATE utf8mb4_0900_ai_ci;
+mysql -h localhost -P 3306 -u root -p < src/main/resources/db/schema-mysql.sql
 ```
 
 本地连接信息建议通过环境变量覆盖，避免把密码写入文档或提交历史：
@@ -87,13 +74,15 @@ export UNICOMM_DB_USERNAME="root"
 export UNICOMM_DB_PASSWORD="<your-local-password>"
 ```
 
-启动 MySQL 模式：
+启动服务：
 
 ```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+mvn spring-boot:run
 ```
 
-`application-mysql.yml` 会自动执行 `src/main/resources/db/schema-mysql.sql` 建表脚本。
+服务启动后运行在 `http://localhost:28080`。
+
+`application.yml` 会自动执行 `src/main/resources/db/schema-mysql.sql`。该文件是当前唯一的 MySQL 初始化脚本入口。
 
 ### Memo API Smoke Test
 
@@ -204,7 +193,7 @@ Content-Type: application/json
 }
 ```
 
-## 测试用户 (Phase 1 内存数据)
+## 测试用户 (Phase 1 临时数据)
 
 | 员工编号 | 显示名称    | Windows 用户   | 域      | 状态 |
 |---------|------------|----------------|---------|------|
@@ -238,10 +227,9 @@ Content-Type: application/json
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
 | server.port | 服务端口 | 28080 |
-| unicomm.data-mode | 数据模式 (dev=内存, mysql=MySQL 持久化) | dev |
-| unicomm.datasource.url | MySQL JDBC 地址，仅 mysql 模式使用 | application-mysql.yml |
-| unicomm.datasource.username | MySQL 用户名，仅 mysql 模式使用 | root |
-| unicomm.datasource.password | MySQL 密码，仅 mysql 模式使用 | 通过 `UNICOMM_DB_PASSWORD` 覆盖 |
+| unicomm.datasource.url | MySQL JDBC 地址 | `jdbc:mysql://localhost:3306/unicomm...` |
+| unicomm.datasource.username | MySQL 用户名 | root |
+| unicomm.datasource.password | MySQL 密码 | 通过 `UNICOMM_DB_PASSWORD` 覆盖 |
 | sa-token.timeout | Token 有效期 (秒) | 259200 (3天) |
 
 ## License

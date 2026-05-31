@@ -7,7 +7,6 @@ import com.unicomm.module.auth.dto.DesktopVerifyRequest;
 import com.unicomm.module.auth.dto.DesktopVerifyResponse;
 import com.unicomm.module.auth.service.AuthService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
@@ -18,9 +17,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 认证服务实现类.
  *
- * <p><strong>Phase 1:</strong> 使用内存数据模拟公司人员接口返回，
- * 此模式适用于开发和测试阶段。</p>
- * <p><strong>Phase 2:</strong> 将接入真实公司人员接口，替换内存数据。</p>
+ * <p><strong>Phase 1:</strong> 使用临时员工数据模拟公司人员接口返回，
+ * 便于桌面端和 Memo 功能联调。</p>
+ * <p><strong>Phase 2:</strong> 将接入真实公司人员接口，替换临时数据。</p>
  *
  * <p><strong>认证流程:</strong></p>
  * <ol>
@@ -29,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>后端根据 username 调用公司人员接口获取员工信息</li>
  *   <li>如果人员接口返回有效员工并且状态正常，则创建会话 Token</li>
  *   <li>如果人员接口返回失败/用户不存在/用户停用，则拒绝访问</li>
- *   <li>后端把人员信息写入 uni_user_snapshot (缓存和审计)</li>
+ *   <li>后续接入正式人员接口后，可按需保存认证审计记录</li>
  *   <li>返回 accessToken 给桌面端</li>
  * </ol>
  *
@@ -50,7 +49,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AuthServiceImpl implements AuthService {
 
     /**
-     * 内存用户存储 (Phase 1 替代公司人员接口).
+     * 临时员工数据 (Phase 1 替代公司人员接口).
      *
      * <p>使用 ConcurrentHashMap 保证线程安全。</p>
      * <p>Key 格式: domain#username</p>
@@ -65,9 +64,6 @@ public class AuthServiceImpl implements AuthService {
      * </pre>
      */
     private final Map<String, EmployeeInfo> employeeCache = new ConcurrentHashMap<>();
-
-    @Value("${unicomm.data-mode:dev}")
-    private String dataMode;
 
     /**
      * 员工信息内部类 (Phase 1 模拟公司人员接口返回).
@@ -94,18 +90,13 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 初始化种子数据 (Phase 1).
+     * 初始化临时员工数据 (Phase 1).
      *
      * @since 0.1.0
      */
     @PostConstruct
     public void initSeedData() {
-        if (!"dev".equals(dataMode)) {
-            log.info("data-mode={}, 跳过内存数据初始化", dataMode);
-            return;
-        }
-
-        log.info("Phase 1: 初始化内存员工数据 (模拟公司人员接口)...");
+        log.info("Phase 1: 初始化临时员工数据 (模拟公司人员接口)...");
 
         // 种子用户 1: Evan Zhao - 正常员工
         employeeCache.put("COMPANY#evan.zhao",
@@ -127,7 +118,7 @@ public class AuthServiceImpl implements AuthService {
             new EmployeeInfo("bob.li", "E10003", "Bob Li",
                 "IT Department", "bob.li@company.com", "inactive"));
 
-        log.info("内存员工数据初始化完成, 共 {} 条记录", employeeCache.size());
+        log.info("临时员工数据初始化完成, 共 {} 条记录", employeeCache.size());
     }
 
     /**
@@ -136,10 +127,10 @@ public class AuthServiceImpl implements AuthService {
      * <p><strong>详细流程:</strong></p>
      * <ol>
      *   <li>接收桌面端请求 (username, domain, computerName, deviceId...)</li>
-     *   <li>调用公司人员接口获取员工信息 (Phase 1 使用内存模拟)</li>
+     *   <li>调用公司人员接口获取员工信息 (Phase 1 使用临时数据模拟)</li>
      *   <li>如果人员不存在或状态为 inactive，返回 401</li>
      *   <li>调用 Sa-Token.login() 签发会话 Token</li>
-     *   <li>将员工信息写入 uni_user_snapshot (缓存和审计)</li>
+     *   <li>后续接入正式人员接口后，可按需保存认证审计记录</li>
      *   <li>返回包含 username, employeeNo, displayName, accessToken 的响应</li>
      * </ol>
      *
@@ -155,7 +146,7 @@ public class AuthServiceImpl implements AuthService {
         log.info("桌面认证请求: domain={}, username={}, computerName={}",
                 request.getDomain(), request.getUsername(), request.getComputerName());
 
-        // ---- 1. 调用公司人员接口获取员工信息 (Phase 1 使用内存模拟) ----
+        // ---- 1. 调用公司人员接口获取员工信息 (Phase 1 使用临时数据模拟) ----
         // TODO Phase 2: 替换为真实公司人员接口调用
         // EmployeeInfo emp = companyHrApi.getEmployeeByUsername(request.getUsername());
         EmployeeInfo emp = employeeCache.get(key);
@@ -177,8 +168,7 @@ public class AuthServiceImpl implements AuthService {
         StpUtil.login(emp.username);
         String token = StpUtil.getTokenValue();
 
-        // ---- 5. TODO: 将员工信息写入 uni_user_snapshot (缓存和审计) ----
-        // userSnapshotService.saveOrUpdate(emp);
+        // ---- 5. TODO: 接入正式人员接口后保存认证审计记录 ----
 
         // ---- 6. 构建并返回响应 ----
         DesktopVerifyResponse response = DesktopVerifyResponse.builder()

@@ -9,6 +9,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,8 +28,18 @@ public class MemoWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws IOException {
-        if ("ping".equalsIgnoreCase(message.getPayload())) {
+        String payload = message.getPayload();
+        if ("ping".equalsIgnoreCase(payload) || isJsonPing(payload)) {
             session.sendMessage(new TextMessage("pong"));
+        }
+    }
+
+    private boolean isJsonPing(String payload) {
+        try {
+            Map<?, ?> body = objectMapper.readValue(payload, Map.class);
+            return "ping".equalsIgnoreCase(String.valueOf(body.get("type")));
+        } catch (IOException ignored) {
+            return false;
         }
     }
 

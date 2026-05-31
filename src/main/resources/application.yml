@@ -5,6 +5,12 @@ spring:
   application:
     name: unicomm-server
 
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema-mysql.sql
+      encoding: UTF-8
+
   # Redis 配置 (Phase 1 使用内存模拟，生产环境取消注释)
   # redis:
   #   host: localhost
@@ -27,24 +33,12 @@ springdoc:
     tags-sorter: alpha
     operations-sorter: alpha
 
-# MyBatis Plus 配置
-mybatis-plus:
-  mapper-locations: classpath*:/mapper/**/*.xml
-  type-aliases-package: com.unicomm.module.**.entity
-  global-config:
-    db-config:
-      id-type: auto
-      logic-delete-field: deleted
-      logic-delete-value: 1
-      logic-not-delete-value: 0
-  configuration:
-    map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
-
-# 通用配置
 unicomm:
-  # 数据模式: dev=内存模式; mysql=MySQL 持久化模式
-  data-mode: dev
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${UNICOMM_DB_URL:jdbc:mysql://localhost:3306/unicomm?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${UNICOMM_DB_USERNAME:root}
+    password: ${UNICOMM_DB_PASSWORD:}
 
 # Sa-Token 配置
 sa-token:

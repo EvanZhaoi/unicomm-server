@@ -13,7 +13,6 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
 import com.unicomm.module.memo.realtime.MemoRealtimePublisher;
 import lombok.RequiredArgsConstructor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -33,7 +32,6 @@ import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "unicomm.data-mode", havingValue = "mysql")
 public class JdbcMemoService implements MemoService {
 
     private static final String DEFAULT_GROUP_NAME = "我的备忘";
