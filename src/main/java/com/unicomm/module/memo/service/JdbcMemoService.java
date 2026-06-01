@@ -486,7 +486,7 @@ public class JdbcMemoService implements MemoService {
 
     private String normalizeTitle(String title) {
         if (!StringUtils.hasText(title)) {
-            return "无标题";
+            return "";
         }
         return title.trim();
     }
