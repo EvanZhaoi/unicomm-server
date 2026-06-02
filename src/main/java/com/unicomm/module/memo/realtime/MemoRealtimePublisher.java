@@ -3,6 +3,8 @@ package com.unicomm.module.memo.realtime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.Set;
+
 @Component
 @RequiredArgsConstructor
 public class MemoRealtimePublisher {
@@ -23,6 +25,21 @@ public class MemoRealtimePublisher {
      */
     public void publishMemoChanged(String ownerUsername, String type, Long memoId, Long groupId) {
         webSocketHandler.broadcast(MemoRealtimeEvent.memo(type, ownerUsername, memoId, groupId));
+    }
+
+    /**
+     * 发布会影响多个用户的 Memo 变更事件。
+     *
+     * <p>当前 WebSocket handler 仍是单实例广播，recipientUsernames 会进入事件体，
+     * 前端可据此判断事件是否和当前用户相关；后续接入用户级会话后，也可以在 handler 层按这个列表分发。</p>
+     */
+    public void publishMemoChanged(
+            String ownerUsername,
+            Set<String> recipientUsernames,
+            String type,
+            Long memoId,
+            Long groupId) {
+        webSocketHandler.broadcast(MemoRealtimeEvent.memo(type, ownerUsername, recipientUsernames, memoId, groupId));
     }
 
     /**

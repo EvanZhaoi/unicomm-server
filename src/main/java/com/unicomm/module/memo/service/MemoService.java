@@ -6,6 +6,7 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoCreateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupCreateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupUpdateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
 
@@ -27,6 +28,8 @@ public interface MemoService {
     MemoResponse createMemo(MemoCreateRequest request);
 
     MemoResponse updateMemo(Long id, MemoUpdateRequest request);
+
+    MemoResponse updateRelatedUsers(Long id, MemoRelatedUsersUpdateRequest request);
 
     void deleteMemo(Long id);
 

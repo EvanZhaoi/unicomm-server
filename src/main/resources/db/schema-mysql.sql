@@ -41,3 +41,20 @@ CREATE TABLE IF NOT EXISTS uni_memo (
     CONSTRAINT fk_uni_memo_group
         FOREIGN KEY (group_id) REFERENCES uni_memo_group (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 主表';
+
+CREATE TABLE IF NOT EXISTS uni_memo_related_user (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    memo_id BIGINT NOT NULL COMMENT '关联的 Memo ID',
+    owner_username VARCHAR(100) NOT NULL COMMENT 'Memo 所有者用户名，便于所有者维度查询和权限校验',
+    related_username VARCHAR(100) NOT NULL COMMENT '相关人用户名，相关人可以查看该 Memo',
+    permission VARCHAR(20) NOT NULL DEFAULT 'view' COMMENT '相关人权限：view=仅查看，后续可扩展 edit',
+    deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0=未删除，1=已删除',
+    create_time DATETIME NOT NULL COMMENT '创建时间',
+    update_time DATETIME NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_memo_related_user (memo_id, related_username),
+    KEY idx_memo_related_visible (related_username, deleted, memo_id),
+    KEY idx_memo_related_owner (owner_username, deleted, memo_id),
+    CONSTRAINT fk_uni_memo_related_memo
+        FOREIGN KEY (memo_id) REFERENCES uni_memo (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 相关人表';

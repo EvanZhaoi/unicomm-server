@@ -9,6 +9,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public final class MemoDtos {
 
@@ -22,6 +23,7 @@ public final class MemoDtos {
     @Schema(description = "Memo 响应")
     public static class MemoResponse {
         private Long id;
+        private String ownerUsername;
         private String title;
         private String content;
         private Long groupId;
@@ -30,6 +32,22 @@ public final class MemoDtos {
         private Boolean isTop;
         private Boolean isFavorite;
         private Boolean isArchived;
+        private Boolean isOwner;
+        private Boolean isShared;
+        private List<MemoRelatedUserResponse> relatedUsers;
+        private LocalDateTime createTime;
+        private LocalDateTime updateTime;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    @Schema(description = "Memo 相关人响应")
+    public static class MemoRelatedUserResponse {
+        private Long id;
+        private String username;
+        private String permission;
         private LocalDateTime createTime;
         private LocalDateTime updateTime;
     }
@@ -48,6 +66,8 @@ public final class MemoDtos {
         private Long groupId;
 
         private String status;
+
+        private List<String> relatedUsernames;
     }
 
     @Data
@@ -64,6 +84,16 @@ public final class MemoDtos {
         private Long groupId;
 
         private String status;
+
+        private List<String> relatedUsernames;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Schema(description = "更新 Memo 相关人请求")
+    public static class MemoRelatedUsersUpdateRequest {
+        private List<String> relatedUsernames;
     }
 
     @Data

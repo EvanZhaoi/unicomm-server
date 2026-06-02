@@ -1,6 +1,8 @@
 package com.unicomm.module.memo.realtime;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Memo 实时事件载荷。
@@ -11,6 +13,7 @@ import java.time.LocalDateTime;
  * @param module 模块名，当前固定为 memo
  * @param type 事件类型，如 memo.created、group.updated
  * @param ownerUsername 事件所属用户
+ * @param recipientUsernames 本次变更影响的用户列表，包含创建者和相关人
  * @param memoId 变更的 Memo ID，分组事件为空
  * @param groupId 变更影响的分组 ID
  * @param occurredAt 服务端事件生成时间，使用字符串避免额外 Jackson 时间模块配置
@@ -19,15 +22,39 @@ public record MemoRealtimeEvent(
         String module,
         String type,
         String ownerUsername,
+        List<String> recipientUsernames,
         Long memoId,
         Long groupId,
         String occurredAt) {
 
     public static MemoRealtimeEvent memo(String type, String ownerUsername, Long memoId, Long groupId) {
-        return new MemoRealtimeEvent("memo", type, ownerUsername, memoId, groupId, LocalDateTime.now().toString());
+        return memo(type, ownerUsername, Set.of(ownerUsername), memoId, groupId);
+    }
+
+    public static MemoRealtimeEvent memo(
+            String type,
+            String ownerUsername,
+            Set<String> recipientUsernames,
+            Long memoId,
+            Long groupId) {
+        return new MemoRealtimeEvent(
+                "memo",
+                type,
+                ownerUsername,
+                List.copyOf(recipientUsernames),
+                memoId,
+                groupId,
+                LocalDateTime.now().toString());
     }
 
     public static MemoRealtimeEvent group(String type, String ownerUsername, Long groupId) {
-        return new MemoRealtimeEvent("memo", type, ownerUsername, null, groupId, LocalDateTime.now().toString());
+        return new MemoRealtimeEvent(
+                "memo",
+                type,
+                ownerUsername,
+                List.of(ownerUsername),
+                null,
+                groupId,
+                LocalDateTime.now().toString());
     }
 }

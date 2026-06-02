@@ -4,6 +4,7 @@ import com.unicomm.common.PageResult;
 import com.unicomm.common.Result;
 import com.unicomm.module.memo.dto.MemoDtos.BooleanStateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoCreateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
 import com.unicomm.module.memo.service.MemoService;
@@ -60,6 +61,14 @@ public class MemoController {
     @Operation(summary = "更新 Memo")
     public Result<MemoResponse> update(@PathVariable Long id, @Valid @RequestBody MemoUpdateRequest request) {
         return Result.success(memoService.updateMemo(id, request));
+    }
+
+    @PutMapping("/{id}/related-users")
+    @Operation(summary = "更新 Memo 相关人")
+    public Result<MemoResponse> updateRelatedUsers(
+            @PathVariable Long id,
+            @RequestBody MemoRelatedUsersUpdateRequest request) {
+        return Result.success(memoService.updateRelatedUsers(id, request));
     }
 
     @DeleteMapping("/{id}")

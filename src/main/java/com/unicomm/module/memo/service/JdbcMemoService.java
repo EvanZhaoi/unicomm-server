@@ -9,6 +9,8 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoCreateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupCreateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupUpdateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUserResponse;
+import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
 import com.unicomm.module.memo.realtime.MemoRealtimePublisher;
@@ -26,9 +28,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -38,7 +43,7 @@ public class JdbcMemoService implements MemoService {
      * 当前 Memo 模块只保留 MySQL 持久化实现。
      *
      * 设计约束：
-     * 1. 所有业务数据必须带 owner_username，查询和写入都必须按当前登录用户隔离。
+     * 1. Memo 仍有明确 owner_username；列表和详情同时允许 owner 与相关人查看。
      * 2. 删除采用逻辑删除，避免误删后无法恢复，也便于后续做回收站。
      * 3. 写操作完成后发布 WebSocket 事件，桌面端没有刷新按钮，依赖事件触发重新拉取。
      * 4. 使用 NamedParameterJdbcTemplate 是为了让 SQL 字段和业务含义更直接，当前阶段不引入 ORM。
@@ -82,7 +87,17 @@ public class JdbcMemoService implements MemoService {
         params.put("offset", offset);
 
         // 统一拼接 WHERE，count 查询和列表查询共用同一组过滤条件，避免分页总数和列表内容不一致。
-        StringBuilder where = new StringBuilder(" WHERE m.owner_username = :owner AND m.deleted = 0");
+        StringBuilder where = new StringBuilder("""
+                 WHERE m.deleted = 0
+                   AND (m.owner_username = :owner
+                        OR EXISTS (
+                            SELECT 1
+                            FROM uni_memo_related_user ru
+                            WHERE ru.memo_id = m.id
+                              AND ru.related_username = :owner
+                              AND ru.deleted = 0
+                        ))
+                """);
         if (groupId != null) {
             where.append(" AND m.group_id = :groupId");
             params.put("groupId", groupId);
@@ -121,7 +136,7 @@ public class JdbcMemoService implements MemoService {
         long safeTotal = total == null ? 0 : total;
         long pages = safeTotal == 0 ? 0 : (safeTotal + safeSize - 1) / safeSize;
         return PageResult.<MemoResponse>builder()
-                .list(list)
+                .list(enrichMemoResponses(list, owner))
                 .total(safeTotal)
                 .page(safePage)
                 .size(safeSize)
@@ -171,9 +186,11 @@ public class JdbcMemoService implements MemoService {
                 new String[]{"id"});
 
         MemoResponse memo = getMemo(requiredKey(keyHolder));
+        replaceRelatedUsers(memo.getId(), owner, request.getRelatedUsernames());
+        memo = getMemo(memo.getId());
 
         // 创建 Memo 会影响列表和分组计数，所以同时广播 memo.created 和 group.updated。
-        realtimePublisher.publishMemoChanged(owner, "memo.created", memo.getId(), memo.getGroupId());
+        realtimePublisher.publishMemoChanged(owner, memoRecipients(memo.getId(), owner), "memo.created", memo.getId(), memo.getGroupId());
         realtimePublisher.publishGroupChanged(owner, "group.updated", memo.getGroupId());
         return memo;
     }
@@ -183,6 +200,7 @@ public class JdbcMemoService implements MemoService {
     public MemoResponse updateMemo(Long id, MemoUpdateRequest request) {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
+        Set<String> recipients = memoRecipients(id, owner);
         if (request.getGroupId() != null) {
             // 分组为空表示不调整分组；分组不为空时仍然必须校验归属。
             requireGroupForOwner(request.getGroupId(), owner);
@@ -207,8 +225,26 @@ public class JdbcMemoService implements MemoService {
                         .addValue("status", normalizeStatus(request.getStatus()))
                         .addValue("updateTime", LocalDateTime.now()));
 
+        if (request.getRelatedUsernames() != null) {
+            replaceRelatedUsers(id, owner, request.getRelatedUsernames());
+            recipients.addAll(memoRecipients(id, owner));
+        }
+
         MemoResponse memo = getMemo(id);
-        realtimePublisher.publishMemoChanged(owner, "memo.updated", memo.getId(), memo.getGroupId());
+        realtimePublisher.publishMemoChanged(owner, recipients, "memo.updated", memo.getId(), memo.getGroupId());
+        return memo;
+    }
+
+    @Override
+    @Transactional
+    public MemoResponse updateRelatedUsers(Long id, MemoRelatedUsersUpdateRequest request) {
+        String owner = currentUsername();
+        requireMemoForOwner(id, owner);
+        Set<String> recipients = memoRecipients(id, owner);
+        replaceRelatedUsers(id, owner, request == null ? null : request.getRelatedUsernames());
+        recipients.addAll(memoRecipients(id, owner));
+        MemoResponse memo = getMemo(id);
+        realtimePublisher.publishMemoChanged(owner, recipients, "memo.related.updated", memo.getId(), memo.getGroupId());
         return memo;
     }
 
@@ -217,6 +253,7 @@ public class JdbcMemoService implements MemoService {
     public void deleteMemo(Long id) {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
+        Set<String> recipients = memoRecipients(id, owner);
         jdbcTemplate.update(
                 """
                 UPDATE uni_memo
@@ -228,7 +265,17 @@ public class JdbcMemoService implements MemoService {
                         .addValue("owner", owner)
                         .addValue("deletedTime", LocalDateTime.now())
                         .addValue("updateTime", LocalDateTime.now()));
-        realtimePublisher.publishMemoChanged(owner, "memo.deleted", id, null);
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo_related_user
+                SET deleted = 1, update_time = :updateTime
+                WHERE memo_id = :id AND owner_username = :owner AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner)
+                        .addValue("updateTime", LocalDateTime.now()));
+        realtimePublisher.publishMemoChanged(owner, recipients, "memo.deleted", id, null);
         realtimePublisher.publishGroupChanged(owner, "group.updated", null);
     }
 
@@ -377,7 +424,7 @@ public class JdbcMemoService implements MemoService {
                         .addValue("value", value ? 1 : 0)
                         .addValue("updateTime", LocalDateTime.now()));
         MemoResponse memo = getMemo(id);
-        realtimePublisher.publishMemoChanged(owner, "memo.updated", memo.getId(), memo.getGroupId());
+        realtimePublisher.publishMemoChanged(owner, memoRecipients(id, owner), "memo.updated", memo.getId(), memo.getGroupId());
         return memo;
     }
 
@@ -387,19 +434,42 @@ public class JdbcMemoService implements MemoService {
                 SELECT m.*, g.name AS group_name
                 FROM uni_memo m
                 LEFT JOIN uni_memo_group g ON g.id = m.group_id
-                WHERE m.id = :id AND m.owner_username = :owner AND m.deleted = 0
+                WHERE m.id = :id
+                  AND m.deleted = 0
+                  AND (m.owner_username = :owner
+                       OR EXISTS (
+                           SELECT 1
+                           FROM uni_memo_related_user ru
+                           WHERE ru.memo_id = m.id
+                             AND ru.related_username = :owner
+                             AND ru.deleted = 0
+                       ))
                 """,
                 new MapSqlParameterSource()
                         .addValue("id", id)
                         .addValue("owner", owner),
                 memoMapper());
-        return list.isEmpty() ? null : list.getFirst();
+        return list.isEmpty() ? null : enrichMemoResponse(list.getFirst(), owner);
     }
 
     private void requireMemoForOwner(Long id, String owner) {
-        if (id == null || findMemoResponse(id, owner) == null) {
+        if (id == null || !existsMemoForOwner(id, owner)) {
             throw new BusinessException(ResultCode.NOT_FOUND, "Memo 不存在");
         }
+    }
+
+    private boolean existsMemoForOwner(Long id, String owner) {
+        Long count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM uni_memo
+                WHERE id = :id AND owner_username = :owner AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner),
+                Long.class);
+        return count != null && count > 0;
     }
 
     private MemoGroupResponse requireGroupForOwner(Long groupId, String owner) {
@@ -484,6 +554,119 @@ public class JdbcMemoService implements MemoService {
         return (maxSort == null ? 0 : maxSort) + 10;
     }
 
+    private void replaceRelatedUsers(Long memoId, String owner, List<String> relatedUsernames) {
+        Set<String> normalized = normalizeRelatedUsernames(relatedUsernames, owner);
+        LocalDateTime now = LocalDateTime.now();
+
+        // 先软删除当前关系，再按最新名单恢复或插入。这样客户端只需要提交完整相关人列表。
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo_related_user
+                SET deleted = 1, update_time = :updateTime
+                WHERE memo_id = :memoId AND owner_username = :owner
+                """,
+                new MapSqlParameterSource()
+                        .addValue("memoId", memoId)
+                        .addValue("owner", owner)
+                        .addValue("updateTime", now));
+
+        for (String username : normalized) {
+            jdbcTemplate.update(
+                    """
+                    INSERT INTO uni_memo_related_user
+                        (memo_id, owner_username, related_username, permission, deleted, create_time, update_time)
+                    VALUES
+                        (:memoId, :owner, :relatedUsername, 'view', 0, :createTime, :updateTime)
+                    ON DUPLICATE KEY UPDATE
+                        permission = 'view',
+                        deleted = 0,
+                        update_time = VALUES(update_time)
+                    """,
+                    new MapSqlParameterSource()
+                            .addValue("memoId", memoId)
+                            .addValue("owner", owner)
+                            .addValue("relatedUsername", username)
+                            .addValue("createTime", now)
+                            .addValue("updateTime", now));
+        }
+    }
+
+    private Set<String> normalizeRelatedUsernames(List<String> relatedUsernames, String owner) {
+        Set<String> normalized = new LinkedHashSet<>();
+        if (relatedUsernames == null) {
+            return normalized;
+        }
+
+        for (String username : relatedUsernames) {
+            if (!StringUtils.hasText(username)) {
+                continue;
+            }
+            String value = username.trim();
+            if (!value.equals(owner)) {
+                normalized.add(value);
+            }
+        }
+        return normalized;
+    }
+
+    private Set<String> memoRecipients(Long memoId, String owner) {
+        Set<String> recipients = new LinkedHashSet<>();
+        recipients.add(owner);
+        recipients.addAll(relatedUsernames(memoId));
+        return recipients;
+    }
+
+    private List<String> relatedUsernames(Long memoId) {
+        return jdbcTemplate.queryForList(
+                """
+                SELECT related_username
+                FROM uni_memo_related_user
+                WHERE memo_id = :memoId AND deleted = 0
+                ORDER BY id ASC
+                """,
+                Map.of("memoId", memoId),
+                String.class);
+    }
+
+    private MemoResponse enrichMemoResponse(MemoResponse memo, String currentUsername) {
+        if (memo == null) {
+            return null;
+        }
+
+        List<MemoRelatedUserResponse> relatedUsers = listRelatedUsers(memo.getId());
+        boolean isOwner = memo.getOwnerUsername().equals(currentUsername);
+        memo.setIsOwner(isOwner);
+        memo.setIsShared(!isOwner);
+        memo.setRelatedUsers(relatedUsers);
+        return memo;
+    }
+
+    private List<MemoResponse> enrichMemoResponses(List<MemoResponse> memos, String currentUsername) {
+        List<MemoResponse> enriched = new ArrayList<>(memos.size());
+        for (MemoResponse memo : memos) {
+            enriched.add(enrichMemoResponse(memo, currentUsername));
+        }
+        return enriched;
+    }
+
+    private List<MemoRelatedUserResponse> listRelatedUsers(Long memoId) {
+        return jdbcTemplate.query(
+                """
+                SELECT *
+                FROM uni_memo_related_user
+                WHERE memo_id = :memoId AND deleted = 0
+                ORDER BY id ASC
+                """,
+                Map.of("memoId", memoId),
+                (rs, rowNum) -> MemoRelatedUserResponse.builder()
+                        .id(rs.getLong("id"))
+                        .username(rs.getString("related_username"))
+                        .permission(rs.getString("permission"))
+                        .createTime(toLocalDateTime(rs, "create_time"))
+                        .updateTime(toLocalDateTime(rs, "update_time"))
+                        .build());
+    }
+
     private String normalizeTitle(String title) {
         if (!StringUtils.hasText(title)) {
             return "";
@@ -530,6 +713,7 @@ public class JdbcMemoService implements MemoService {
         // RowMapper 是数据库行到 API 响应 DTO 的唯一转换点，避免 SQL 字段名泄漏到 controller。
         return (rs, rowNum) -> MemoResponse.builder()
                 .id(rs.getLong("id"))
+                .ownerUsername(rs.getString("owner_username"))
                 .title(rs.getString("title"))
                 .content(rs.getString("content"))
                 .groupId(rs.getLong("group_id"))
