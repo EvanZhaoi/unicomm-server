@@ -6,10 +6,13 @@ import com.unicomm.common.ResultCode;
 import com.unicomm.module.auth.dto.DesktopVerifyRequest;
 import com.unicomm.module.auth.dto.DesktopVerifyResponse;
 import com.unicomm.module.auth.service.AuthService;
+import com.unicomm.module.member.dto.MemberSearchResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import jakarta.annotation.PostConstruct;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -113,6 +116,14 @@ public class AuthServiceImpl implements AuthService {
             new EmployeeInfo("alice.wang", "E10002", "Alice Wang",
                 "HR Department", "alice.wang@company.com", "active"));
 
+        employeeCache.put("COMPANY#leader.wang",
+            new EmployeeInfo("leader.wang", "E10004", "Leader Wang",
+                "Management", "leader.wang@company.com", "active"));
+
+        employeeCache.put("COMPANY#pm.li",
+            new EmployeeInfo("pm.li", "E10005", "PM Li",
+                "Product Department", "pm.li@company.com", "active"));
+
         // 种子用户 3: Bob Li - 已停用员工
         employeeCache.put("COMPANY#bob.li",
             new EmployeeInfo("bob.li", "E10003", "Bob Li",
@@ -187,10 +198,41 @@ public class AuthServiceImpl implements AuthService {
         return response;
     }
 
+    @Override
+    public List<MemberSearchResponse> searchMembers(String keyword, Integer limit) {
+        String normalizedKeyword = StringUtils.hasText(keyword) ? keyword.trim().toLowerCase() : "";
+        int safeLimit = limit == null || limit < 1 ? 10 : Math.min(limit, 20);
+
+        return employeeCache.values().stream()
+                .filter(employee -> "active".equals(employee.status))
+                .filter(employee -> normalizedKeyword.isEmpty() || matches(employee, normalizedKeyword))
+                .sorted(Comparator.comparing(employee -> employee.displayName))
+                .limit(safeLimit)
+                .map(employee -> MemberSearchResponse.builder()
+                        .username(employee.username)
+                        .employeeNo(employee.employeeNo)
+                        .displayName(employee.displayName)
+                        .departmentName(employee.departmentName)
+                        .email(employee.email)
+                        .build())
+                .toList();
+    }
+
     /**
      * 构建用户缓存 Key.
      */
     private String buildUserKey(String domain, String username) {
         return (domain == null ? "" : domain) + "#" + (username == null ? "" : username);
+    }
+
+    private boolean matches(EmployeeInfo employee, String keyword) {
+        return containsIgnoreCase(employee.username, keyword)
+                || containsIgnoreCase(employee.employeeNo, keyword)
+                || containsIgnoreCase(employee.displayName, keyword)
+                || containsIgnoreCase(employee.email, keyword);
+    }
+
+    private boolean containsIgnoreCase(String value, String keyword) {
+        return value != null && value.toLowerCase().contains(keyword);
     }
 }

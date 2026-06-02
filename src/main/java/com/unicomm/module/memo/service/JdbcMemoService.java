@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.unicomm.common.BusinessException;
 import com.unicomm.common.PageResult;
 import com.unicomm.common.ResultCode;
+import com.unicomm.module.auth.service.AuthService;
 import com.unicomm.module.memo.dto.MemoDtos.BooleanStateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoCreateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupCreateRequest;
@@ -14,6 +15,7 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
 import com.unicomm.module.memo.realtime.MemoRealtimePublisher;
+import com.unicomm.module.member.dto.MemberSearchResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -62,6 +64,7 @@ public class JdbcMemoService implements MemoService {
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final MemoRealtimePublisher realtimePublisher;
+    private final AuthService authService;
 
     @Override
     public PageResult<MemoResponse> listMemos(
@@ -658,13 +661,28 @@ public class JdbcMemoService implements MemoService {
                 ORDER BY id ASC
                 """,
                 Map.of("memoId", memoId),
-                (rs, rowNum) -> MemoRelatedUserResponse.builder()
-                        .id(rs.getLong("id"))
-                        .username(rs.getString("related_username"))
-                        .permission(rs.getString("permission"))
-                        .createTime(toLocalDateTime(rs, "create_time"))
-                        .updateTime(toLocalDateTime(rs, "update_time"))
-                        .build());
+                (rs, rowNum) -> {
+                    String username = rs.getString("related_username");
+                    MemberSearchResponse member = findMember(username);
+                    return MemoRelatedUserResponse.builder()
+                            .id(rs.getLong("id"))
+                            .username(username)
+                            .employeeNo(member == null ? null : member.getEmployeeNo())
+                            .displayName(member == null ? null : member.getDisplayName())
+                            .departmentName(member == null ? null : member.getDepartmentName())
+                            .email(member == null ? null : member.getEmail())
+                            .permission(rs.getString("permission"))
+                            .createTime(toLocalDateTime(rs, "create_time"))
+                            .updateTime(toLocalDateTime(rs, "update_time"))
+                            .build();
+                });
+    }
+
+    private MemberSearchResponse findMember(String username) {
+        return authService.searchMembers(username, 20).stream()
+                .filter(member -> member.getUsername().equals(username))
+                .findFirst()
+                .orElse(null);
     }
 
     private String normalizeTitle(String title) {

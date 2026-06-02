@@ -2,6 +2,9 @@ package com.unicomm.module.auth.service;
 
 import com.unicomm.module.auth.dto.DesktopVerifyRequest;
 import com.unicomm.module.auth.dto.DesktopVerifyResponse;
+import com.unicomm.module.member.dto.MemberSearchResponse;
+
+import java.util.List;
 
 /**
  * 认证服务接口.
@@ -53,4 +56,6 @@ public interface AuthService {
      * @see DesktopVerifyResponse
      */
     DesktopVerifyResponse desktopVerify(DesktopVerifyRequest request);
+
+    List<MemberSearchResponse> searchMembers(String keyword, Integer limit);
 }

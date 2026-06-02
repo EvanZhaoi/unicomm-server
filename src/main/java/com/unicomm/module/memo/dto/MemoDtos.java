@@ -47,6 +47,10 @@ public final class MemoDtos {
     public static class MemoRelatedUserResponse {
         private Long id;
         private String username;
+        private String employeeNo;
+        private String displayName;
+        private String departmentName;
+        private String email;
         private String permission;
         private LocalDateTime createTime;
         private LocalDateTime updateTime;
