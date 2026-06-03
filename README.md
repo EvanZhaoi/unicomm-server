@@ -136,6 +136,15 @@ NODE
 
 当前事件类型包括 `memo.created`、`memo.updated`、`memo.deleted`、`group.created`、`group.updated`、`group.deleted`。
 
+### Memo 相关人权限
+
+Memo 以创建人为 `owner`，相关人支持两种权限：
+
+- `view`：只读，只能查看该 Memo。
+- `edit`：可编辑标题、正文和状态。
+
+只有 `owner` 可以调整分组、相关人权限、置顶、收藏、归档和删除。接口仍兼容旧的 `relatedUsernames` 字段，新版前端会提交 `relatedUsers: [{ username, permission }]`。
+
 ## API 文档
 
 启动服务后访问:

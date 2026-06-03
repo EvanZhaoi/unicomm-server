@@ -34,6 +34,7 @@ public final class MemoDtos {
         private Boolean isArchived;
         private Boolean isOwner;
         private Boolean isShared;
+        private String currentUserPermission;
         private List<MemoRelatedUserResponse> relatedUsers;
         private LocalDateTime createTime;
         private LocalDateTime updateTime;
@@ -72,6 +73,8 @@ public final class MemoDtos {
         private String status;
 
         private List<String> relatedUsernames;
+
+        private List<MemoRelatedUserRequest> relatedUsers;
     }
 
     @Data
@@ -90,6 +93,8 @@ public final class MemoDtos {
         private String status;
 
         private List<String> relatedUsernames;
+
+        private List<MemoRelatedUserRequest> relatedUsers;
     }
 
     @Data
@@ -98,6 +103,18 @@ public final class MemoDtos {
     @Schema(description = "更新 Memo 相关人请求")
     public static class MemoRelatedUsersUpdateRequest {
         private List<String> relatedUsernames;
+
+        private List<MemoRelatedUserRequest> relatedUsers;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    @Schema(description = "Memo 相关人请求")
+    public static class MemoRelatedUserRequest {
+        private String username;
+        private String permission;
     }
 
     @Data

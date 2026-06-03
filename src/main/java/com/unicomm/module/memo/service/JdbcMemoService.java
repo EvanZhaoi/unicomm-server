@@ -10,6 +10,7 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoCreateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupCreateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupUpdateRequest;
+import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUserRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUserResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
@@ -54,6 +55,9 @@ public class JdbcMemoService implements MemoService {
     private static final String DEFAULT_GROUP_COLOR = "#6B7280";
     private static final String DEFAULT_GROUP_ICON = "folder";
     private static final String DEFAULT_STATUS = "normal";
+    private static final String PERMISSION_OWNER = "owner";
+    private static final String PERMISSION_EDIT = "edit";
+    private static final String PERMISSION_VIEW = "view";
 
     /*
      * 认证拦截器目前还没有强制保护所有 Memo 接口。保留一个本地兜底用户，
@@ -189,7 +193,7 @@ public class JdbcMemoService implements MemoService {
                 new String[]{"id"});
 
         MemoResponse memo = getMemo(requiredKey(keyHolder));
-        replaceRelatedUsers(memo.getId(), owner, request.getRelatedUsernames());
+        replaceRelatedUsers(memo.getId(), owner, relatedUserRequests(request.getRelatedUsers(), request.getRelatedUsernames()));
         memo = getMemo(memo.getId());
 
         // 创建 Memo 会影响列表和分组计数，所以同时广播 memo.created 和 group.updated。
@@ -202,10 +206,14 @@ public class JdbcMemoService implements MemoService {
     @Transactional
     public MemoResponse updateMemo(Long id, MemoUpdateRequest request) {
         String owner = currentUsername();
-        requireMemoForOwner(id, owner);
+        boolean ownerCanManage = isMemoOwner(id, owner);
+        requireMemoCanEdit(id, owner);
         Set<String> recipients = memoRecipients(id, owner);
         if (request.getGroupId() != null) {
             // 分组为空表示不调整分组；分组不为空时仍然必须校验归属。
+            if (!ownerCanManage) {
+                throw new BusinessException(ResultCode.PERMISSION_DENIED, "只有 Memo 创建人可以调整分组");
+            }
             requireGroupForOwner(request.getGroupId(), owner);
         }
 
@@ -214,22 +222,26 @@ public class JdbcMemoService implements MemoService {
                 UPDATE uni_memo
                 SET title = :title,
                     content = :content,
-                    group_id = COALESCE(:groupId, group_id),
+                    group_id = CASE WHEN :canManage = 1 THEN COALESCE(:groupId, group_id) ELSE group_id END,
                     status = :status,
                     update_time = :updateTime
-                WHERE id = :id AND owner_username = :owner AND deleted = 0
+                WHERE id = :id AND deleted = 0
                 """,
                 new MapSqlParameterSource()
                         .addValue("id", id)
                         .addValue("owner", owner)
+                        .addValue("canManage", ownerCanManage ? 1 : 0)
                         .addValue("title", normalizeTitle(request.getTitle()))
                         .addValue("content", request.getContent() == null ? "" : request.getContent())
                         .addValue("groupId", request.getGroupId())
                         .addValue("status", normalizeStatus(request.getStatus()))
                         .addValue("updateTime", LocalDateTime.now()));
 
-        if (request.getRelatedUsernames() != null) {
-            replaceRelatedUsers(id, owner, request.getRelatedUsernames());
+        if (request.getRelatedUsers() != null || request.getRelatedUsernames() != null) {
+            if (!ownerCanManage) {
+                throw new BusinessException(ResultCode.PERMISSION_DENIED, "只有 Memo 创建人可以调整相关人");
+            }
+            replaceRelatedUsers(id, owner, relatedUserRequests(request.getRelatedUsers(), request.getRelatedUsernames()));
             recipients.addAll(memoRecipients(id, owner));
         }
 
@@ -244,7 +256,10 @@ public class JdbcMemoService implements MemoService {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
         Set<String> recipients = memoRecipients(id, owner);
-        replaceRelatedUsers(id, owner, request == null ? null : request.getRelatedUsernames());
+        replaceRelatedUsers(
+                id,
+                owner,
+                request == null ? null : relatedUserRequests(request.getRelatedUsers(), request.getRelatedUsernames()));
         recipients.addAll(memoRecipients(id, owner));
         MemoResponse memo = getMemo(id);
         realtimePublisher.publishMemoChanged(owner, recipients, "memo.related.updated", memo.getId(), memo.getGroupId());
@@ -461,6 +476,16 @@ public class JdbcMemoService implements MemoService {
         }
     }
 
+    private void requireMemoCanEdit(Long id, String username) {
+        String permission = memoPermission(id, username);
+        if (permission == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "Memo 不存在");
+        }
+        if (!PERMISSION_OWNER.equals(permission) && !PERMISSION_EDIT.equals(permission)) {
+            throw new BusinessException(ResultCode.PERMISSION_DENIED, "当前用户没有编辑该 Memo 的权限");
+        }
+    }
+
     private boolean existsMemoForOwner(Long id, String owner) {
         Long count = jdbcTemplate.queryForObject(
                 """
@@ -473,6 +498,44 @@ public class JdbcMemoService implements MemoService {
                         .addValue("owner", owner),
                 Long.class);
         return count != null && count > 0;
+    }
+
+    private boolean isMemoOwner(Long id, String username) {
+        return PERMISSION_OWNER.equals(memoPermission(id, username));
+    }
+
+    private String memoPermission(Long id, String username) {
+        if (id == null || !StringUtils.hasText(username)) {
+            return null;
+        }
+
+        List<String> permissions = jdbcTemplate.queryForList(
+                """
+                SELECT permission
+                FROM (
+                    SELECT :ownerPermission AS permission, 0 AS sort_order
+                    FROM uni_memo m
+                    WHERE m.id = :id
+                      AND m.owner_username = :username
+                      AND m.deleted = 0
+                    UNION ALL
+                    SELECT ru.permission AS permission, 1 AS sort_order
+                    FROM uni_memo m
+                    JOIN uni_memo_related_user ru ON ru.memo_id = m.id
+                    WHERE m.id = :id
+                      AND m.deleted = 0
+                      AND ru.related_username = :username
+                      AND ru.deleted = 0
+                ) p
+                ORDER BY sort_order ASC
+                LIMIT 1
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("username", username)
+                        .addValue("ownerPermission", PERMISSION_OWNER),
+                String.class);
+        return permissions.isEmpty() ? null : permissions.getFirst();
     }
 
     private MemoGroupResponse requireGroupForOwner(Long groupId, String owner) {
@@ -557,8 +620,8 @@ public class JdbcMemoService implements MemoService {
         return (maxSort == null ? 0 : maxSort) + 10;
     }
 
-    private void replaceRelatedUsers(Long memoId, String owner, List<String> relatedUsernames) {
-        Set<String> normalized = normalizeRelatedUsernames(relatedUsernames, owner);
+    private void replaceRelatedUsers(Long memoId, String owner, List<MemoRelatedUserRequest> relatedUsers) {
+        Map<String, String> normalized = normalizeRelatedUsers(relatedUsers, owner);
         LocalDateTime now = LocalDateTime.now();
 
         // 先软删除当前关系，再按最新名单恢复或插入。这样客户端只需要提交完整相关人列表。
@@ -573,43 +636,78 @@ public class JdbcMemoService implements MemoService {
                         .addValue("owner", owner)
                         .addValue("updateTime", now));
 
-        for (String username : normalized) {
+        for (Map.Entry<String, String> relatedUser : normalized.entrySet()) {
             jdbcTemplate.update(
                     """
                     INSERT INTO uni_memo_related_user
                         (memo_id, owner_username, related_username, permission, deleted, create_time, update_time)
                     VALUES
-                        (:memoId, :owner, :relatedUsername, 'view', 0, :createTime, :updateTime)
+                        (:memoId, :owner, :relatedUsername, :permission, 0, :createTime, :updateTime)
                     ON DUPLICATE KEY UPDATE
-                        permission = 'view',
+                        permission = VALUES(permission),
                         deleted = 0,
                         update_time = VALUES(update_time)
                     """,
                     new MapSqlParameterSource()
                             .addValue("memoId", memoId)
                             .addValue("owner", owner)
-                            .addValue("relatedUsername", username)
+                            .addValue("relatedUsername", relatedUser.getKey())
+                            .addValue("permission", relatedUser.getValue())
                             .addValue("createTime", now)
                             .addValue("updateTime", now));
         }
     }
 
-    private Set<String> normalizeRelatedUsernames(List<String> relatedUsernames, String owner) {
-        Set<String> normalized = new LinkedHashSet<>();
+    private List<MemoRelatedUserRequest> relatedUserRequests(
+            List<MemoRelatedUserRequest> relatedUsers,
+            List<String> relatedUsernames) {
+        if (relatedUsers != null) {
+            return relatedUsers;
+        }
         if (relatedUsernames == null) {
+            return null;
+        }
+        List<MemoRelatedUserRequest> requests = new ArrayList<>(relatedUsernames.size());
+        for (String username : relatedUsernames) {
+            requests.add(MemoRelatedUserRequest.builder()
+                    .username(username)
+                    .permission(PERMISSION_VIEW)
+                    .build());
+        }
+        return requests;
+    }
+
+    private Map<String, String> normalizeRelatedUsers(List<MemoRelatedUserRequest> relatedUsers, String owner) {
+        Map<String, String> normalized = new java.util.LinkedHashMap<>();
+        if (relatedUsers == null) {
             return normalized;
         }
 
-        for (String username : relatedUsernames) {
+        for (MemoRelatedUserRequest relatedUser : relatedUsers) {
+            if (relatedUser == null) {
+                continue;
+            }
+            String username = relatedUser.getUsername();
             if (!StringUtils.hasText(username)) {
                 continue;
             }
             String value = username.trim();
             if (!value.equals(owner)) {
-                normalized.add(value);
+                normalized.put(value, normalizeRelatedPermission(relatedUser.getPermission()));
             }
         }
         return normalized;
+    }
+
+    private String normalizeRelatedPermission(String permission) {
+        if (!StringUtils.hasText(permission)) {
+            return PERMISSION_VIEW;
+        }
+        return switch (permission.trim()) {
+            case PERMISSION_EDIT -> PERMISSION_EDIT;
+            case PERMISSION_VIEW -> PERMISSION_VIEW;
+            default -> throw new BusinessException(ResultCode.BAD_REQUEST, "相关人权限不合法");
+        };
     }
 
     private Set<String> memoRecipients(Long memoId, String owner) {
@@ -640,6 +738,7 @@ public class JdbcMemoService implements MemoService {
         boolean isOwner = memo.getOwnerUsername().equals(currentUsername);
         memo.setIsOwner(isOwner);
         memo.setIsShared(!isOwner);
+        memo.setCurrentUserPermission(isOwner ? PERMISSION_OWNER : memoPermission(memo.getId(), currentUsername));
         memo.setRelatedUsers(relatedUsers);
         return memo;
     }

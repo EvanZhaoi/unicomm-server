@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS uni_memo_related_user (
     memo_id BIGINT NOT NULL COMMENT '关联的 Memo ID',
     owner_username VARCHAR(100) NOT NULL COMMENT 'Memo 所有者用户名，便于所有者维度查询和权限校验',
     related_username VARCHAR(100) NOT NULL COMMENT '相关人用户名，相关人可以查看该 Memo',
-    permission VARCHAR(20) NOT NULL DEFAULT 'view' COMMENT '相关人权限：view=仅查看，后续可扩展 edit',
+    permission VARCHAR(20) NOT NULL DEFAULT 'view' COMMENT '相关人权限：view=仅查看，edit=可编辑标题、正文和状态',
     deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0=未删除，1=已删除',
     create_time DATETIME NOT NULL COMMENT '创建时间',
     update_time DATETIME NOT NULL COMMENT '更新时间',
