@@ -422,7 +422,7 @@ public class JdbcMemoService implements MemoService {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
 
-        // column 只由 updateTop/updateFavorite/updateArchive 三个内部方法传入，避免外部输入拼接 SQL。
+        // column 只由 updateTop/updateFavorite 两个内部方法传入，避免外部输入拼接 SQL。
         jdbcTemplate.update(
                 "UPDATE uni_memo SET " + column + " = :value, update_time = :updateTime "
                         + "WHERE id = :id AND owner_username = :owner AND deleted = 0",
