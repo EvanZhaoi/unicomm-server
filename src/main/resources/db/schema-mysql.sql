@@ -57,3 +57,34 @@ CREATE TABLE IF NOT EXISTS uni_memo_related_user (
     CONSTRAINT fk_uni_memo_related_memo
         FOREIGN KEY (memo_id) REFERENCES uni_memo (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 相关人表';
+
+CREATE TABLE IF NOT EXISTS uni_memo_tag (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    owner_username VARCHAR(100) NOT NULL COMMENT '标签所有者用户名，用于用户数据隔离',
+    name VARCHAR(20) NOT NULL COMMENT '标签名称',
+    color VARCHAR(32) NOT NULL DEFAULT '#6B7280' COMMENT '标签颜色，HEX 或主题色标识',
+    deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0=未删除，1=已删除',
+    create_time DATETIME NOT NULL COMMENT '创建时间',
+    update_time DATETIME NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_memo_tag_owner_name (owner_username, name, deleted),
+    KEY idx_memo_tag_owner (owner_username, deleted, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 标签表';
+
+CREATE TABLE IF NOT EXISTS uni_memo_tag_rel (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    memo_id BIGINT NOT NULL COMMENT '关联的 Memo ID',
+    tag_id BIGINT NOT NULL COMMENT '关联的标签 ID',
+    owner_username VARCHAR(100) NOT NULL COMMENT 'Memo 所有者用户名，便于权限校验和清理',
+    deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0=未删除，1=已删除',
+    create_time DATETIME NOT NULL COMMENT '创建时间',
+    update_time DATETIME NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_memo_tag_rel (memo_id, tag_id),
+    KEY idx_memo_tag_rel_tag (tag_id, deleted, memo_id),
+    KEY idx_memo_tag_rel_memo (memo_id, deleted),
+    CONSTRAINT fk_uni_memo_tag_rel_memo
+        FOREIGN KEY (memo_id) REFERENCES uni_memo (id),
+    CONSTRAINT fk_uni_memo_tag_rel_tag
+        FOREIGN KEY (tag_id) REFERENCES uni_memo_tag (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 标签关联表';
