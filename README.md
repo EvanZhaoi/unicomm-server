@@ -150,6 +150,8 @@ Memo 以创建人为 `owner`，相关人支持两种权限：
 
 只有 `owner` 可以调整分组、标签、相关人权限、置顶、收藏和删除。接口仍兼容旧的 `relatedUsernames` 字段，新版前端会提交 `relatedUsers: [{ username, permission }]`。
 
+Memo 列表支持 `tagId` 按标签筛选，也支持 `isShared=true` 查询“与我相关”，即别人共享给当前用户且非当前用户创建的 Memo。
+
 ## API 文档
 
 启动服务后访问:
