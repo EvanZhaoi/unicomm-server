@@ -38,11 +38,10 @@ public class MemoController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) Long groupId,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) Boolean isArchived,
             @RequestParam(required = false) Boolean isFavorite,
             @RequestParam(required = false) String status) {
 
-        return Result.success(memoService.listMemos(page, size, groupId, keyword, isArchived, isFavorite, status));
+        return Result.success(memoService.listMemos(page, size, groupId, keyword, isFavorite, status));
     }
 
     @GetMapping("/{id}")
@@ -90,9 +89,4 @@ public class MemoController {
         return Result.success(memoService.updateFavorite(id, request));
     }
 
-    @PatchMapping("/{id}/archive")
-    @Operation(summary = "归档或取消归档")
-    public Result<MemoResponse> archive(@PathVariable Long id, @RequestBody BooleanStateRequest request) {
-        return Result.success(memoService.updateArchive(id, request));
-    }
 }

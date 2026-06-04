@@ -19,7 +19,6 @@ public interface MemoService {
             Integer size,
             Long groupId,
             String keyword,
-            Boolean isArchived,
             Boolean isFavorite,
             String status);
 
@@ -36,8 +35,6 @@ public interface MemoService {
     MemoResponse updateTop(Long id, BooleanStateRequest request);
 
     MemoResponse updateFavorite(Long id, BooleanStateRequest request);
-
-    MemoResponse updateArchive(Long id, BooleanStateRequest request);
 
     List<MemoGroupResponse> listGroups();
 

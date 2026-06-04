@@ -76,7 +76,6 @@ public class JdbcMemoService implements MemoService {
             Integer size,
             Long groupId,
             String keyword,
-            Boolean isArchived,
             Boolean isFavorite,
             String status) {
 
@@ -108,10 +107,6 @@ public class JdbcMemoService implements MemoService {
         if (groupId != null) {
             where.append(" AND m.group_id = :groupId");
             params.put("groupId", groupId);
-        }
-        if (isArchived != null) {
-            where.append(" AND m.is_archived = :isArchived");
-            params.put("isArchived", isArchived ? 1 : 0);
         }
         if (isFavorite != null) {
             where.append(" AND m.is_favorite = :isFavorite");
@@ -177,9 +172,9 @@ public class JdbcMemoService implements MemoService {
                 """
                 INSERT INTO uni_memo
                     (owner_username, title, content, group_id, status, is_top, is_favorite,
-                     is_archived, deleted, create_time, update_time)
+                     deleted, create_time, update_time)
                 VALUES
-                    (:owner, :title, :content, :groupId, :status, 0, 0, 0, 0, :createTime, :updateTime)
+                    (:owner, :title, :content, :groupId, :status, 0, 0, 0, :createTime, :updateTime)
                 """,
                 new MapSqlParameterSource()
                         .addValue("owner", owner)
@@ -305,11 +300,6 @@ public class JdbcMemoService implements MemoService {
     @Override
     public MemoResponse updateFavorite(Long id, BooleanStateRequest request) {
         return updateMemoBoolean(id, "is_favorite", Boolean.TRUE.equals(request.getValue()));
-    }
-
-    @Override
-    public MemoResponse updateArchive(Long id, BooleanStateRequest request) {
-        return updateMemoBoolean(id, "is_archived", Boolean.TRUE.equals(request.getValue()));
     }
 
     @Override
@@ -838,7 +828,6 @@ public class JdbcMemoService implements MemoService {
                 .status(rs.getString("status"))
                 .isTop(rs.getBoolean("is_top"))
                 .isFavorite(rs.getBoolean("is_favorite"))
-                .isArchived(rs.getBoolean("is_archived"))
                 .createTime(toLocalDateTime(rs, "create_time"))
                 .updateTime(toLocalDateTime(rs, "update_time"))
                 .build();

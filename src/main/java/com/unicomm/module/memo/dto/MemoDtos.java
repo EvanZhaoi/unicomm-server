@@ -31,7 +31,6 @@ public final class MemoDtos {
         private String status;
         private Boolean isTop;
         private Boolean isFavorite;
-        private Boolean isArchived;
         private Boolean isOwner;
         private Boolean isShared;
         private String currentUserPermission;
