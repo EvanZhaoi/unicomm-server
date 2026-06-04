@@ -80,6 +80,7 @@ public class JdbcMemoService implements MemoService {
             Long groupId,
             String keyword,
             Long tagId,
+            Boolean isShared,
             Boolean isFavorite,
             String status) {
 
@@ -126,6 +127,9 @@ public class JdbcMemoService implements MemoService {
                      )
                     """);
             params.put("tagId", tagId);
+        }
+        if (Boolean.TRUE.equals(isShared)) {
+            where.append(" AND m.owner_username <> :owner");
         }
         if (isFavorite != null) {
             where.append(" AND m.is_favorite = :isFavorite");

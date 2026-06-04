@@ -23,6 +23,7 @@ public interface MemoService {
             Long groupId,
             String keyword,
             Long tagId,
+            Boolean isShared,
             Boolean isFavorite,
             String status);
 
