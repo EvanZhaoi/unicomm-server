@@ -110,6 +110,9 @@ public class AuthServiceImpl implements AuthService {
         employeeCache.put("#evanzhao",
             new EmployeeInfo("evanzhao", "DEV001", "Evan Zhao",
                 "Development", "evanzhao@local.dev", "active"));
+        employeeCache.put("#evan.zhao",
+            new EmployeeInfo("evan.zhao", "DEV002", "Evan Zhao",
+                "Development", "evan.zhao@local.dev", "active"));
 
         // 种子用户 2: Alice Wang - 正常员工
         employeeCache.put("COMPANY#alice.wang",
@@ -222,7 +225,9 @@ public class AuthServiceImpl implements AuthService {
      * 构建用户缓存 Key.
      */
     private String buildUserKey(String domain, String username) {
-        return (domain == null ? "" : domain) + "#" + (username == null ? "" : username);
+        String normalizedDomain = StringUtils.hasText(domain) ? domain.trim().toUpperCase() : "";
+        String normalizedUsername = StringUtils.hasText(username) ? username.trim().toLowerCase() : "";
+        return normalizedDomain + "#" + normalizedUsername;
     }
 
     private boolean matches(EmployeeInfo employee, String keyword) {

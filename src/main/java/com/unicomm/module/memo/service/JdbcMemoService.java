@@ -59,13 +59,6 @@ public class JdbcMemoService implements MemoService {
     private static final String PERMISSION_EDIT = "edit";
     private static final String PERMISSION_VIEW = "view";
 
-    /*
-     * 认证拦截器目前还没有强制保护所有 Memo 接口。保留一个本地兜底用户，
-     * 让接口文档和本机联调在没有 Token 的情况下仍可跑通。
-     * 等后续开启全局鉴权后，这个兜底值应移除。
-     */
-    private static final String DEV_FALLBACK_USERNAME = "evan.zhao";
-
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final MemoRealtimePublisher realtimePublisher;
     private final AuthService authService;
@@ -803,12 +796,8 @@ public class JdbcMemoService implements MemoService {
     }
 
     private String currentUsername() {
-        if (StpUtil.isLogin()) {
-            return StpUtil.getLoginIdAsString();
-        }
-
-        // 临时联调用：正式开启 Memo 接口鉴权后，未登录请求应在拦截器层被拒绝。
-        return DEV_FALLBACK_USERNAME;
+        StpUtil.checkLogin();
+        return StpUtil.getLoginIdAsString();
     }
 
     private long requiredKey(KeyHolder keyHolder) {

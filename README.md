@@ -134,7 +134,13 @@ NODE
 }
 ```
 
-当前事件类型包括 `memo.created`、`memo.updated`、`memo.deleted`、`group.created`、`group.updated`、`group.deleted`。
+当前事件类型包括 `memo.created`、`memo.updated`、`memo.related.updated`、`memo.deleted`、`group.created`、`group.updated`、`group.deleted`。
+
+### 认证与当前用户
+
+除 `/api/v1/auth/desktop/verify` 和 Swagger 文档外，`/api/v1/**` 接口都需要携带后端签发的 Sa-Token。桌面端会同时发送 `unicomm-token` 和 `Authorization: Bearer ...`，后端当前以 `unicomm-token` 作为 token-name。
+
+Memo 模块不再使用开发期默认用户名兜底。创建者、相关人和权限判断都来自 Token 中的 loginId；未登录或 Token 失效时会返回 401。
 
 ### Memo 相关人权限
 

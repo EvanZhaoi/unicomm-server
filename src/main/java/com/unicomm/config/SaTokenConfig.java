@@ -1,6 +1,7 @@
 package com.unicomm.config;
 
 import cn.dev33.satoken.interceptor.SaInterceptor;
+import cn.dev33.satoken.context.SaHolder;
 import cn.dev33.satoken.stp.StpUtil;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -39,34 +40,23 @@ public class SaTokenConfig implements WebMvcConfigurer {
     /**
      * 注册 Sa-Token 拦截器.
      *
-     * <p><strong>Phase 1:</strong> 暂不启用全局拦截，所有接口公开。</p>
-     * <p><strong>Phase 2+:</strong> 将对特定接口启用认证拦截。</p>
-     *
-     * <p>Phase 2+ 配置示例:</p>
-     * <pre>
-     * registry.addInterceptor(new SaInterceptor(handle -> StpUtil.checkLogin()))
-     *         .addPathPatterns("/api/v1/**")
-     *         .excludePathPatterns(
-     *             "/api/v1/auth/desktop/verify",  // 认证接口无需登录
-     *             "/swagger-ui/**",
-     *             "/v3/api-docs/**"
-     *         );
-     * </pre>
-     *
      * @param registry 拦截器注册表
      * @since 0.1.0
      * @see SaInterceptor
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        // Phase 1: 公开所有接口，暂不启用认证拦截
-        // Phase 2+ 示例:
-        // registry.addInterceptor(new SaInterceptor(handle -> StpUtil.checkLogin()))
-        //         .addPathPatterns("/api/v1/**")
-        //         .excludePathPatterns(
-        //             "/api/v1/auth/desktop/verify",
-        //             "/swagger-ui/**",
-        //             "/v3/api-docs/**"
-        //         );
+        registry.addInterceptor(new SaInterceptor(handle -> {
+                    if (!"OPTIONS".equalsIgnoreCase(SaHolder.getRequest().getMethod())) {
+                        StpUtil.checkLogin();
+                    }
+                }))
+                .addPathPatterns("/api/v1/**")
+                .excludePathPatterns(
+                        "/api/v1/auth/desktop/verify",
+                        "/swagger-ui/**",
+                        "/swagger-ui.html",
+                        "/v3/api-docs/**"
+                );
     }
 }
