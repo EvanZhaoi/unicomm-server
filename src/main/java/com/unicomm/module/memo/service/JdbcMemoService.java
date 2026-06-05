@@ -14,9 +14,6 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUserRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUserResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
-import com.unicomm.module.memo.dto.MemoDtos.MemoTagCreateRequest;
-import com.unicomm.module.memo.dto.MemoDtos.MemoTagResponse;
-import com.unicomm.module.memo.dto.MemoDtos.MemoTagUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
 import com.unicomm.module.memo.realtime.MemoRealtimePublisher;
 import com.unicomm.module.member.dto.MemberSearchResponse;
@@ -79,7 +76,6 @@ public class JdbcMemoService implements MemoService {
             Integer size,
             Long groupId,
             String keyword,
-            Long tagId,
             Boolean isShared,
             Boolean isFavorite,
             String status) {
@@ -112,21 +108,6 @@ public class JdbcMemoService implements MemoService {
         if (groupId != null) {
             where.append(" AND m.group_id = :groupId");
             params.put("groupId", groupId);
-        }
-        if (tagId != null) {
-            where.append("""
-                     AND EXISTS (
-                         SELECT 1
-                         FROM uni_memo_tag_rel tr
-                         JOIN uni_memo_tag t ON t.id = tr.tag_id
-                         WHERE tr.memo_id = m.id
-                           AND tr.tag_id = :tagId
-                           AND tr.deleted = 0
-                           AND t.deleted = 0
-                           AND t.owner_username = m.owner_username
-                     )
-                    """);
-            params.put("tagId", tagId);
         }
         if (Boolean.TRUE.equals(isShared)) {
             where.append(" AND m.owner_username <> :owner");
@@ -212,7 +193,6 @@ public class JdbcMemoService implements MemoService {
 
         MemoResponse memo = getMemo(requiredKey(keyHolder));
         replaceRelatedUsers(memo.getId(), owner, relatedUserRequests(request.getRelatedUsers(), request.getRelatedUsernames()));
-        replaceMemoTags(memo.getId(), owner, request.getTagIds());
         memo = getMemo(memo.getId());
 
         // 创建 Memo 会影响列表和分组计数，所以同时广播 memo.created 和 group.updated。
@@ -263,13 +243,6 @@ public class JdbcMemoService implements MemoService {
             replaceRelatedUsers(id, owner, relatedUserRequests(request.getRelatedUsers(), request.getRelatedUsernames()));
             recipients.addAll(memoRecipients(id, owner));
         }
-        if (request.getTagIds() != null) {
-            if (!ownerCanManage) {
-                throw new BusinessException(ResultCode.PERMISSION_DENIED, "只有 Memo 创建人可以调整标签");
-            }
-            replaceMemoTags(id, owner, request.getTagIds());
-        }
-
         MemoResponse memo = getMemo(id);
         realtimePublisher.publishMemoChanged(owner, recipients, "memo.updated", memo.getId(), memo.getGroupId());
         return memo;
@@ -311,16 +284,6 @@ public class JdbcMemoService implements MemoService {
         jdbcTemplate.update(
                 """
                 UPDATE uni_memo_related_user
-                SET deleted = 1, update_time = :updateTime
-                WHERE memo_id = :id AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", id)
-                        .addValue("owner", owner)
-                        .addValue("updateTime", LocalDateTime.now()));
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_tag_rel
                 SET deleted = 1, update_time = :updateTime
                 WHERE memo_id = :id AND owner_username = :owner AND deleted = 0
                 """,
@@ -456,96 +419,6 @@ public class JdbcMemoService implements MemoService {
                         .addValue("owner", owner)
                         .addValue("updateTime", LocalDateTime.now()));
         realtimePublisher.publishGroupChanged(owner, "group.deleted", id);
-    }
-
-    @Override
-    public List<MemoTagResponse> listTags() {
-        String owner = currentUsername();
-        return jdbcTemplate.query(
-                """
-                SELECT *
-                FROM uni_memo_tag
-                WHERE owner_username = :owner AND deleted = 0
-                ORDER BY name ASC, id ASC
-                """,
-                Map.of("owner", owner),
-                tagMapper());
-    }
-
-    @Override
-    @Transactional
-    public MemoTagResponse createTag(MemoTagCreateRequest request) {
-        String owner = currentUsername();
-        LocalDateTime now = LocalDateTime.now();
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbcTemplate.update(
-                """
-                INSERT INTO uni_memo_tag
-                    (owner_username, name, color, deleted, create_time, update_time)
-                VALUES
-                    (:owner, :name, :color, 0, :createTime, :updateTime)
-                """,
-                new MapSqlParameterSource()
-                        .addValue("owner", owner)
-                        .addValue("name", normalizeTagName(request.getName()))
-                        .addValue("color", normalizeColor(request.getColor()))
-                        .addValue("createTime", now)
-                        .addValue("updateTime", now),
-                keyHolder,
-                new String[]{"id"});
-
-        return requireTagForOwner(requiredKey(keyHolder), owner);
-    }
-
-    @Override
-    @Transactional
-    public MemoTagResponse updateTag(Long id, MemoTagUpdateRequest request) {
-        String owner = currentUsername();
-        requireTagForOwner(id, owner);
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_tag
-                SET name = :name,
-                    color = :color,
-                    update_time = :updateTime
-                WHERE id = :id AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", id)
-                        .addValue("owner", owner)
-                        .addValue("name", normalizeTagName(request.getName()))
-                        .addValue("color", normalizeColor(request.getColor()))
-                        .addValue("updateTime", LocalDateTime.now()));
-        return requireTagForOwner(id, owner);
-    }
-
-    @Override
-    @Transactional
-    public void deleteTag(Long id) {
-        String owner = currentUsername();
-        requireTagForOwner(id, owner);
-        LocalDateTime now = LocalDateTime.now();
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_tag
-                SET deleted = 1, update_time = :updateTime
-                WHERE id = :id AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", id)
-                        .addValue("owner", owner)
-                        .addValue("updateTime", now));
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_tag_rel
-                SET deleted = 1, update_time = :updateTime
-                WHERE tag_id = :tagId AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("tagId", id)
-                        .addValue("owner", owner)
-                        .addValue("updateTime", now));
-        realtimePublisher.publishMemoChanged(owner, "memo.updated", null, null);
     }
 
     private MemoResponse updateMemoBoolean(Long id, String column, boolean value) {
@@ -684,28 +557,6 @@ public class JdbcMemoService implements MemoService {
         return list.getFirst();
     }
 
-    private MemoTagResponse requireTagForOwner(Long tagId, String owner) {
-        if (tagId == null) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "标签 ID 不能为空");
-        }
-
-        List<MemoTagResponse> list = jdbcTemplate.query(
-                """
-                SELECT *
-                FROM uni_memo_tag
-                WHERE id = :id AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", tagId)
-                        .addValue("owner", owner),
-                tagMapper());
-
-        if (list.isEmpty()) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "标签不存在");
-        }
-        return list.getFirst();
-    }
-
     private MemoGroupResponse ensureDefaultGroup(String owner) {
         // 默认分组是用户首次使用 Memo 的基础数据。这里采用惰性创建，避免额外初始化流程。
         List<MemoGroupResponse> exists = jdbcTemplate.query(
@@ -800,58 +651,6 @@ public class JdbcMemoService implements MemoService {
         }
     }
 
-    private void replaceMemoTags(Long memoId, String owner, List<Long> tagIds) {
-        LocalDateTime now = LocalDateTime.now();
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_tag_rel
-                SET deleted = 1, update_time = :updateTime
-                WHERE memo_id = :memoId AND owner_username = :owner
-                """,
-                new MapSqlParameterSource()
-                        .addValue("memoId", memoId)
-                        .addValue("owner", owner)
-                        .addValue("updateTime", now));
-
-        for (Long tagId : normalizeTagIds(tagIds, owner)) {
-            jdbcTemplate.update(
-                    """
-                    INSERT INTO uni_memo_tag_rel
-                        (memo_id, tag_id, owner_username, deleted, create_time, update_time)
-                    VALUES
-                        (:memoId, :tagId, :owner, 0, :createTime, :updateTime)
-                    ON DUPLICATE KEY UPDATE
-                        deleted = 0,
-                        update_time = VALUES(update_time)
-                    """,
-                    new MapSqlParameterSource()
-                            .addValue("memoId", memoId)
-                            .addValue("tagId", tagId)
-                            .addValue("owner", owner)
-                            .addValue("createTime", now)
-                            .addValue("updateTime", now));
-        }
-    }
-
-    private List<Long> normalizeTagIds(List<Long> tagIds, String owner) {
-        List<Long> normalized = new ArrayList<>();
-        if (tagIds == null) {
-            return normalized;
-        }
-        Set<Long> seen = new LinkedHashSet<>();
-        for (Long tagId : tagIds) {
-            if (tagId == null || !seen.add(tagId)) {
-                continue;
-            }
-            requireTagForOwner(tagId, owner);
-            normalized.add(tagId);
-            if (normalized.size() >= 10) {
-                break;
-            }
-        }
-        return normalized;
-    }
-
     private List<MemoRelatedUserRequest> relatedUserRequests(
             List<MemoRelatedUserRequest> relatedUsers,
             List<String> relatedUsernames) {
@@ -934,7 +733,6 @@ public class JdbcMemoService implements MemoService {
         memo.setIsShared(!isOwner);
         memo.setCurrentUserPermission(isOwner ? PERMISSION_OWNER : memoPermission(memo.getId(), currentUsername));
         memo.setRelatedUsers(relatedUsers);
-        memo.setTags(listMemoTags(memo.getId()));
         return memo;
     }
 
@@ -972,21 +770,6 @@ public class JdbcMemoService implements MemoService {
                 });
     }
 
-    private List<MemoTagResponse> listMemoTags(Long memoId) {
-        return jdbcTemplate.query(
-                """
-                SELECT t.*
-                FROM uni_memo_tag t
-                JOIN uni_memo_tag_rel tr ON tr.tag_id = t.id
-                WHERE tr.memo_id = :memoId
-                  AND tr.deleted = 0
-                  AND t.deleted = 0
-                ORDER BY t.name ASC, t.id ASC
-                """,
-                Map.of("memoId", memoId),
-                tagMapper());
-    }
-
     private MemberSearchResponse findMember(String username) {
         return authService.searchMembers(username, 20).stream()
                 .filter(member -> member.getUsername().equals(username))
@@ -1009,13 +792,6 @@ public class JdbcMemoService implements MemoService {
             case "normal", "todo", "done" -> status;
             default -> throw new BusinessException(ResultCode.BAD_REQUEST, "Memo 状态不合法");
         };
-    }
-
-    private String normalizeTagName(String name) {
-        if (!StringUtils.hasText(name)) {
-            throw new BusinessException(ResultCode.BAD_REQUEST, "标签名称不能为空");
-        }
-        return name.trim();
     }
 
     private String normalizeColor(String color) {
@@ -1070,16 +846,6 @@ public class JdbcMemoService implements MemoService {
                 .sortOrder(rs.getInt("sort_order"))
                 .isDefault(rs.getBoolean("is_default"))
                 .memoCount(rs.getLong("memo_count"))
-                .createTime(toLocalDateTime(rs, "create_time"))
-                .updateTime(toLocalDateTime(rs, "update_time"))
-                .build();
-    }
-
-    private RowMapper<MemoTagResponse> tagMapper() {
-        return (rs, rowNum) -> MemoTagResponse.builder()
-                .id(rs.getLong("id"))
-                .name(rs.getString("name"))
-                .color(rs.getString("color"))
                 .createTime(toLocalDateTime(rs, "create_time"))
                 .updateTime(toLocalDateTime(rs, "update_time"))
                 .build();

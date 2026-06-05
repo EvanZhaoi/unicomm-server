@@ -35,7 +35,6 @@ public final class MemoDtos {
         private Boolean isShared;
         private String currentUserPermission;
         private List<MemoRelatedUserResponse> relatedUsers;
-        private List<MemoTagResponse> tags;
         private LocalDateTime createTime;
         private LocalDateTime updateTime;
     }
@@ -75,8 +74,6 @@ public final class MemoDtos {
         private List<String> relatedUsernames;
 
         private List<MemoRelatedUserRequest> relatedUsers;
-
-        private List<Long> tagIds;
     }
 
     @Data
@@ -97,8 +94,6 @@ public final class MemoDtos {
         private List<String> relatedUsernames;
 
         private List<MemoRelatedUserRequest> relatedUsers;
-
-        private List<Long> tagIds;
     }
 
     @Data
@@ -119,45 +114,6 @@ public final class MemoDtos {
     public static class MemoRelatedUserRequest {
         private String username;
         private String permission;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Builder
-    @Schema(description = "Memo 标签响应")
-    public static class MemoTagResponse {
-        private Long id;
-        private String name;
-        private String color;
-        private LocalDateTime createTime;
-        private LocalDateTime updateTime;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Builder
-    @Schema(description = "创建 Memo 标签请求")
-    public static class MemoTagCreateRequest {
-        @NotBlank(message = "标签名称不能为空")
-        @Size(max = 20, message = "标签名称最多 20 字符")
-        private String name;
-
-        private String color;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @Builder
-    @Schema(description = "更新 Memo 标签请求")
-    public static class MemoTagUpdateRequest {
-        @NotBlank(message = "标签名称不能为空")
-        @Size(max = 20, message = "标签名称最多 20 字符")
-        private String name;
-
-        private String color;
     }
 
     @Data

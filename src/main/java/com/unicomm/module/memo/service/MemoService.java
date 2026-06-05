@@ -8,9 +8,6 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoGroupResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoGroupUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
-import com.unicomm.module.memo.dto.MemoDtos.MemoTagCreateRequest;
-import com.unicomm.module.memo.dto.MemoDtos.MemoTagResponse;
-import com.unicomm.module.memo.dto.MemoDtos.MemoTagUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
 
 import java.util.List;
@@ -22,7 +19,6 @@ public interface MemoService {
             Integer size,
             Long groupId,
             String keyword,
-            Long tagId,
             Boolean isShared,
             Boolean isFavorite,
             String status);
@@ -48,12 +44,4 @@ public interface MemoService {
     MemoGroupResponse updateGroup(Long id, MemoGroupUpdateRequest request);
 
     void deleteGroup(Long id);
-
-    List<MemoTagResponse> listTags();
-
-    MemoTagResponse createTag(MemoTagCreateRequest request);
-
-    MemoTagResponse updateTag(Long id, MemoTagUpdateRequest request);
-
-    void deleteTag(Long id);
 }

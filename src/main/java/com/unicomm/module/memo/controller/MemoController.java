@@ -38,12 +38,11 @@ public class MemoController {
             @RequestParam(required = false) Integer size,
             @RequestParam(required = false) Long groupId,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) Long tagId,
             @RequestParam(required = false) Boolean isShared,
             @RequestParam(required = false) Boolean isFavorite,
             @RequestParam(required = false) String status) {
 
-        return Result.success(memoService.listMemos(page, size, groupId, keyword, tagId, isShared, isFavorite, status));
+        return Result.success(memoService.listMemos(page, size, groupId, keyword, isShared, isFavorite, status));
     }
 
     @GetMapping("/{id}")
