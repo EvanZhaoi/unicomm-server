@@ -106,8 +106,23 @@ public class JdbcMemoService implements MemoService {
             where.append(" AND m.owner_username <> :owner");
         }
         if (isFavorite != null) {
-            where.append(" AND m.is_favorite = :isFavorite");
-            params.put("isFavorite", isFavorite ? 1 : 0);
+            where.append(isFavorite ? """
+                      AND EXISTS (
+                          SELECT 1
+                          FROM uni_memo_favorite f
+                          WHERE f.memo_id = m.id
+                            AND f.username = :owner
+                            AND f.deleted = 0
+                      )
+                    """ : """
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM uni_memo_favorite f
+                          WHERE f.memo_id = m.id
+                            AND f.username = :owner
+                            AND f.deleted = 0
+                      )
+                    """);
         }
         if (StringUtils.hasText(status)) {
             where.append(" AND m.status = :status");
@@ -168,10 +183,9 @@ public class JdbcMemoService implements MemoService {
         jdbcTemplate.update(
                 """
                 INSERT INTO uni_memo
-                    (owner_username, title, content, group_id, status, is_top, is_favorite,
-                     deleted, create_time, update_time)
+                    (owner_username, title, content, group_id, status, is_top, deleted, create_time, update_time)
                 VALUES
-                    (:owner, :title, :content, :groupId, :status, 0, 0, 0, :createTime, :updateTime)
+                    (:owner, :title, :content, :groupId, :status, 0, 0, :createTime, :updateTime)
                 """,
                 new MapSqlParameterSource()
                         .addValue("owner", owner)
@@ -284,6 +298,16 @@ public class JdbcMemoService implements MemoService {
                         .addValue("id", id)
                         .addValue("owner", owner)
                         .addValue("updateTime", LocalDateTime.now()));
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo_favorite
+                SET deleted = 1, update_time = :updateTime
+                WHERE memo_id = :id AND owner_username = :owner AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner)
+                        .addValue("updateTime", LocalDateTime.now()));
         realtimePublisher.publishMemoChanged(owner, recipients, "memo.deleted", id, null);
         realtimePublisher.publishGroupChanged(owner, "group.updated", null);
     }
@@ -295,7 +319,35 @@ public class JdbcMemoService implements MemoService {
 
     @Override
     public MemoResponse updateFavorite(Long id, BooleanStateRequest request) {
-        return updateMemoBoolean(id, "is_favorite", Boolean.TRUE.equals(request.getValue()));
+        String username = currentUsername();
+        MemoResponse memo = findMemoResponse(id, username);
+        if (memo == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "Memo 不存在");
+        }
+
+        boolean value = Boolean.TRUE.equals(request.getValue());
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.update(
+                """
+                INSERT INTO uni_memo_favorite
+                    (memo_id, username, owner_username, deleted, create_time, update_time)
+                VALUES
+                    (:memoId, :username, :ownerUsername, :deleted, :createTime, :updateTime)
+                ON DUPLICATE KEY UPDATE
+                    deleted = VALUES(deleted),
+                    owner_username = VALUES(owner_username),
+                    update_time = VALUES(update_time)
+                """,
+                new MapSqlParameterSource()
+                        .addValue("memoId", id)
+                        .addValue("username", username)
+                        .addValue("ownerUsername", memo.getOwnerUsername())
+                        .addValue("deleted", value ? 0 : 1)
+                        .addValue("createTime", now)
+                        .addValue("updateTime", now));
+        MemoResponse updated = getMemo(id);
+        realtimePublisher.publishMemoChanged(updated.getOwnerUsername(), Set.of(username), "memo.updated", updated.getId(), updated.getGroupId());
+        return updated;
     }
 
     @Override
@@ -418,7 +470,7 @@ public class JdbcMemoService implements MemoService {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
 
-        // column 只由 updateTop/updateFavorite 两个内部方法传入，避免外部输入拼接 SQL。
+        // column 只由 updateTop 内部方法传入，避免外部输入拼接 SQL。
         jdbcTemplate.update(
                 "UPDATE uni_memo SET " + column + " = :value, update_time = :updateTime "
                         + "WHERE id = :id AND owner_username = :owner AND deleted = 0",
@@ -715,6 +767,20 @@ public class JdbcMemoService implements MemoService {
                 String.class);
     }
 
+    private boolean isFavorite(Long memoId, String username) {
+        Long count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM uni_memo_favorite
+                WHERE memo_id = :memoId AND username = :username AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("memoId", memoId)
+                        .addValue("username", username),
+                Long.class);
+        return count != null && count > 0;
+    }
+
     private MemoResponse enrichMemoResponse(MemoResponse memo, String currentUsername) {
         if (memo == null) {
             return null;
@@ -726,6 +792,7 @@ public class JdbcMemoService implements MemoService {
         memo.setIsShared(!isOwner);
         memo.setCurrentUserPermission(isOwner ? PERMISSION_OWNER : memoPermission(memo.getId(), currentUsername));
         memo.setRelatedUsers(relatedUsers);
+        memo.setIsFavorite(isFavorite(memo.getId(), currentUsername));
         return memo;
     }
 
@@ -819,7 +886,6 @@ public class JdbcMemoService implements MemoService {
                 .groupName(rs.getString("group_name"))
                 .status(rs.getString("status"))
                 .isTop(rs.getBoolean("is_top"))
-                .isFavorite(rs.getBoolean("is_favorite"))
                 .createTime(toLocalDateTime(rs, "create_time"))
                 .updateTime(toLocalDateTime(rs, "update_time"))
                 .build();
