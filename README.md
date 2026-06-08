@@ -149,7 +149,9 @@ Memo 以创建人为 `owner`，相关人支持两种权限：
 - `view`：只读，只能查看该 Memo。
 - `edit`：可编辑标题、正文和状态。
 
-只有 `owner` 可以调整分组、相关人权限、置顶和删除。收藏是用户自己的 Memo 关系状态，创建者和相关人都可以收藏/取消收藏自己可见的 Memo。接口仍兼容旧的 `relatedUsernames` 字段，新版前端会提交 `relatedUsers: [{ username, permission }]`。
+只有 `owner` 可以调整分组、相关人权限和删除。置顶与收藏都是用户自己的 Memo 关系状态，创建者和相关人都可以置顶/取消置顶、收藏/取消收藏自己可见的 Memo。接口仍兼容旧的 `relatedUsernames` 字段，新版前端会提交 `relatedUsers: [{ username, permission }]`。
+
+`uni_memo_top` 与 `uni_memo_favorite` 分别保存用户维度置顶和收藏状态，避免多人查看同一 Memo 时互相影响排序或收藏标记。
 
 Memo 列表支持 `isShared=true` 查询“与我相关”，即别人共享给当前用户且非当前用户创建的 Memo。
 

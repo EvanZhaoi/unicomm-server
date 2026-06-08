@@ -140,10 +140,18 @@ public class JdbcMemoService implements MemoService {
 
         List<MemoResponse> list = jdbcTemplate.query(
                 """
-                SELECT m.*, g.name AS group_name
+                SELECT m.*,
+                       g.name AS group_name,
+                       EXISTS (
+                           SELECT 1
+                           FROM uni_memo_top t
+                           WHERE t.memo_id = m.id
+                             AND t.username = :owner
+                             AND t.deleted = 0
+                       ) AS is_top
                 FROM uni_memo m
                 LEFT JOIN uni_memo_group g ON g.id = m.group_id
-                """ + where + " ORDER BY m.is_top DESC, m.update_time DESC LIMIT :limit OFFSET :offset",
+                """ + where + " ORDER BY is_top DESC, m.update_time DESC LIMIT :limit OFFSET :offset",
                 params,
                 memoMapper());
 
@@ -183,9 +191,9 @@ public class JdbcMemoService implements MemoService {
         jdbcTemplate.update(
                 """
                 INSERT INTO uni_memo
-                    (owner_username, title, content, group_id, status, is_top, deleted, create_time, update_time)
+                    (owner_username, title, content, group_id, status, deleted, create_time, update_time)
                 VALUES
-                    (:owner, :title, :content, :groupId, :status, 0, 0, :createTime, :updateTime)
+                    (:owner, :title, :content, :groupId, :status, 0, :createTime, :updateTime)
                 """,
                 new MapSqlParameterSource()
                         .addValue("owner", owner)
@@ -308,13 +316,51 @@ public class JdbcMemoService implements MemoService {
                         .addValue("id", id)
                         .addValue("owner", owner)
                         .addValue("updateTime", LocalDateTime.now()));
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo_top
+                SET deleted = 1, update_time = :updateTime
+                WHERE memo_id = :id AND owner_username = :owner AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("owner", owner)
+                        .addValue("updateTime", LocalDateTime.now()));
         realtimePublisher.publishMemoChanged(owner, recipients, "memo.deleted", id, null);
         realtimePublisher.publishGroupChanged(owner, "group.updated", null);
     }
 
     @Override
     public MemoResponse updateTop(Long id, BooleanStateRequest request) {
-        return updateMemoBoolean(id, "is_top", Boolean.TRUE.equals(request.getValue()));
+        String username = currentUsername();
+        MemoResponse memo = findMemoResponse(id, username);
+        if (memo == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "Memo 不存在");
+        }
+
+        boolean value = Boolean.TRUE.equals(request.getValue());
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.update(
+                """
+                INSERT INTO uni_memo_top
+                    (memo_id, username, owner_username, deleted, create_time, update_time)
+                VALUES
+                    (:memoId, :username, :ownerUsername, :deleted, :createTime, :updateTime)
+                ON DUPLICATE KEY UPDATE
+                    deleted = VALUES(deleted),
+                    owner_username = VALUES(owner_username),
+                    update_time = VALUES(update_time)
+                """,
+                new MapSqlParameterSource()
+                        .addValue("memoId", id)
+                        .addValue("username", username)
+                        .addValue("ownerUsername", memo.getOwnerUsername())
+                        .addValue("deleted", value ? 0 : 1)
+                        .addValue("createTime", now)
+                        .addValue("updateTime", now));
+        MemoResponse updated = getMemo(id);
+        realtimePublisher.publishMemoChanged(updated.getOwnerUsername(), Set.of(username), "memo.updated", updated.getId(), updated.getGroupId());
+        return updated;
     }
 
     @Override
@@ -466,28 +512,18 @@ public class JdbcMemoService implements MemoService {
         realtimePublisher.publishGroupChanged(owner, "group.deleted", id);
     }
 
-    private MemoResponse updateMemoBoolean(Long id, String column, boolean value) {
-        String owner = currentUsername();
-        requireMemoForOwner(id, owner);
-
-        // column 只由 updateTop 内部方法传入，避免外部输入拼接 SQL。
-        jdbcTemplate.update(
-                "UPDATE uni_memo SET " + column + " = :value, update_time = :updateTime "
-                        + "WHERE id = :id AND owner_username = :owner AND deleted = 0",
-                new MapSqlParameterSource()
-                        .addValue("id", id)
-                        .addValue("owner", owner)
-                        .addValue("value", value ? 1 : 0)
-                        .addValue("updateTime", LocalDateTime.now()));
-        MemoResponse memo = getMemo(id);
-        realtimePublisher.publishMemoChanged(owner, memoRecipients(id, owner), "memo.updated", memo.getId(), memo.getGroupId());
-        return memo;
-    }
-
     private MemoResponse findMemoResponse(Long id, String owner) {
         List<MemoResponse> list = jdbcTemplate.query(
                 """
-                SELECT m.*, g.name AS group_name
+                SELECT m.*,
+                       g.name AS group_name,
+                       EXISTS (
+                           SELECT 1
+                           FROM uni_memo_top t
+                           WHERE t.memo_id = m.id
+                             AND t.username = :owner
+                             AND t.deleted = 0
+                       ) AS is_top
                 FROM uni_memo m
                 LEFT JOIN uni_memo_group g ON g.id = m.group_id
                 WHERE m.id = :id
