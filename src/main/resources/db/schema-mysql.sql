@@ -32,8 +32,9 @@ CREATE TABLE IF NOT EXISTS uni_memo (
     update_time DATETIME NOT NULL COMMENT '更新时间',
     deleted_time DATETIME NULL COMMENT '删除时间',
     PRIMARY KEY (id),
-    KEY idx_memo_owner_list (owner_username, deleted, update_time),
-    KEY idx_memo_owner_group (owner_username, group_id, deleted),
+    KEY idx_memo_owner_list (owner_username, deleted, update_time, id),
+    KEY idx_memo_owner_group (owner_username, group_id, deleted, update_time, id),
+    KEY idx_memo_owner_status (owner_username, status, deleted, update_time, id),
     CONSTRAINT fk_uni_memo_group
         FOREIGN KEY (group_id) REFERENCES uni_memo_group (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 主表';
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS uni_memo_related_user (
     PRIMARY KEY (id),
     UNIQUE KEY uk_memo_related_user (memo_id, related_username),
     KEY idx_memo_related_visible (related_username, deleted, memo_id),
+    KEY idx_memo_related_permission (memo_id, related_username, deleted, id),
     KEY idx_memo_related_owner (owner_username, deleted, memo_id),
     CONSTRAINT fk_uni_memo_related_memo
         FOREIGN KEY (memo_id) REFERENCES uni_memo (id)

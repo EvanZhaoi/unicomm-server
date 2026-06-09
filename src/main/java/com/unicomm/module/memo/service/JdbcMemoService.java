@@ -148,17 +148,36 @@ public class JdbcMemoService implements MemoService {
                            WHERE t.memo_id = m.id
                              AND t.username = :owner
                              AND t.deleted = 0
-                       ) AS is_top
+                       ) AS is_top,
+                       EXISTS (
+                           SELECT 1
+                           FROM uni_memo_favorite f
+                           WHERE f.memo_id = m.id
+                             AND f.username = :owner
+                             AND f.deleted = 0
+                       ) AS is_favorite,
+                       CASE
+                           WHEN m.owner_username = :owner THEN 'owner'
+                           ELSE (
+                               SELECT ru.permission
+                               FROM uni_memo_related_user ru
+                               WHERE ru.memo_id = m.id
+                                 AND ru.related_username = :owner
+                                 AND ru.deleted = 0
+                               ORDER BY ru.id ASC
+                               LIMIT 1
+                           )
+                       END AS current_user_permission
                 FROM uni_memo m
                 LEFT JOIN uni_memo_group g ON g.id = m.group_id
-                """ + where + " ORDER BY is_top DESC, m.update_time DESC LIMIT :limit OFFSET :offset",
+                """ + where + " ORDER BY is_top DESC, m.update_time DESC, m.id DESC LIMIT :limit OFFSET :offset",
                 params,
                 memoMapper());
 
         long safeTotal = total == null ? 0 : total;
         long pages = safeTotal == 0 ? 0 : (safeTotal + safeSize - 1) / safeSize;
         return PageResult.<MemoResponse>builder()
-                .list(enrichMemoResponses(list, owner))
+                .list(enrichMemoListResponses(list, owner))
                 .total(safeTotal)
                 .page(safePage)
                 .size(safeSize)
@@ -840,6 +859,19 @@ public class JdbcMemoService implements MemoService {
         return enriched;
     }
 
+    private List<MemoResponse> enrichMemoListResponses(List<MemoResponse> memos, String currentUsername) {
+        for (MemoResponse memo : memos) {
+            boolean isOwner = memo.getOwnerUsername().equals(currentUsername);
+            memo.setIsOwner(isOwner);
+            memo.setIsShared(!isOwner);
+            if (!StringUtils.hasText(memo.getCurrentUserPermission())) {
+                memo.setCurrentUserPermission(isOwner ? PERMISSION_OWNER : PERMISSION_VIEW);
+            }
+            memo.setRelatedUsers(List.of());
+        }
+        return memos;
+    }
+
     private List<MemoRelatedUserResponse> listRelatedUsers(Long memoId) {
         return jdbcTemplate.query(
                 """
@@ -922,9 +954,20 @@ public class JdbcMemoService implements MemoService {
                 .groupName(rs.getString("group_name"))
                 .status(rs.getString("status"))
                 .isTop(rs.getBoolean("is_top"))
+                .isFavorite(hasColumn(rs, "is_favorite") && rs.getBoolean("is_favorite"))
+                .currentUserPermission(hasColumn(rs, "current_user_permission") ? rs.getString("current_user_permission") : null)
                 .createTime(toLocalDateTime(rs, "create_time"))
                 .updateTime(toLocalDateTime(rs, "update_time"))
                 .build();
+    }
+
+    private boolean hasColumn(ResultSet rs, String columnName) throws SQLException {
+        try {
+            rs.findColumn(columnName);
+            return true;
+        } catch (SQLException ignored) {
+            return false;
+        }
     }
 
     private RowMapper<MemoGroupResponse> groupMapper() {

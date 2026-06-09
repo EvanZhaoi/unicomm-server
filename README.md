@@ -155,6 +155,12 @@ Memo 以创建人为 `owner`，相关人支持两种权限：
 
 Memo 列表支持 `isShared=true` 查询“与我相关”，即别人共享给当前用户且非当前用户创建的 Memo。
 
+### Memo 列表查询与排序
+
+Memo 列表排序统一为“当前用户置顶优先 / Memo 更新时间倒序 / Memo ID 倒序”。置顶状态来自 `uni_memo_top`，按用户隔离，不会影响其他相关人的列表顺序。
+
+列表接口只返回列表展示需要的字段、当前用户权限、收藏状态和置顶状态；相关人完整详情仅在单条 Memo 查询或保存后返回，避免列表分页时对每条 Memo 额外查询相关人和员工信息。`schema-mysql.sql` 为 owner、group、status、related user 和 top/favorite 关系补充了列表查询索引。
+
 ## API 文档
 
 启动服务后访问:
