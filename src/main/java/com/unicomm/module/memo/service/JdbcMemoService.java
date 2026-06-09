@@ -662,7 +662,7 @@ public class JdbcMemoService implements MemoService {
         return list.getFirst();
     }
 
-    private MemoGroupResponse ensureDefaultGroup(String owner) {
+    private synchronized MemoGroupResponse ensureDefaultGroup(String owner) {
         // 默认分组是用户首次使用 Memo 的基础数据。这里采用惰性创建，避免额外初始化流程。
         List<MemoGroupResponse> exists = jdbcTemplate.query(
                 """
@@ -674,13 +674,17 @@ public class JdbcMemoService implements MemoService {
                 FROM uni_memo_group g
                 WHERE g.owner_username = :owner AND g.is_default = 1 AND g.deleted = 0
                 ORDER BY g.id ASC
-                LIMIT 1
                 """,
                 Map.of("owner", owner),
                 groupMapper());
 
         if (!exists.isEmpty()) {
-            return exists.getFirst();
+            MemoGroupResponse defaultGroup = exists.getFirst();
+            if (exists.size() > 1) {
+                mergeDuplicateDefaultGroups(owner, defaultGroup, exists.subList(1, exists.size()));
+                return requireGroupForOwner(defaultGroup.getId(), owner);
+            }
+            return defaultGroup;
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -703,6 +707,39 @@ public class JdbcMemoService implements MemoService {
                 new String[]{"id"});
 
         return requireGroupForOwner(requiredKey(keyHolder), owner);
+    }
+
+    private void mergeDuplicateDefaultGroups(String owner, MemoGroupResponse defaultGroup, List<MemoGroupResponse> duplicates) {
+        // 历史版本或并发首次进入可能留下多个 is_default=1 的分组。
+        // 保留最早创建的默认分组，并把重复默认分组下的 Memo 迁回它，避免用户初次进入看到两个默认分组。
+        List<Long> duplicateIds = new ArrayList<>();
+        for (MemoGroupResponse duplicate : duplicates) {
+            duplicateIds.add(duplicate.getId());
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo
+                SET group_id = :defaultGroupId, update_time = :updateTime
+                WHERE owner_username = :owner AND group_id IN (:duplicateIds) AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("defaultGroupId", defaultGroup.getId())
+                        .addValue("updateTime", now)
+                        .addValue("owner", owner)
+                        .addValue("duplicateIds", duplicateIds));
+
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo_group
+                SET is_default = 0, deleted = 1, update_time = :updateTime
+                WHERE owner_username = :owner AND id IN (:duplicateIds) AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("updateTime", now)
+                        .addValue("owner", owner)
+                        .addValue("duplicateIds", duplicateIds));
     }
 
     private int nextSortOrder(String owner) {
