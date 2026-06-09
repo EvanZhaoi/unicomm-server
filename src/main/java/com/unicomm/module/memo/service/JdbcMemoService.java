@@ -377,9 +377,7 @@ public class JdbcMemoService implements MemoService {
                         .addValue("deleted", value ? 0 : 1)
                         .addValue("createTime", now)
                         .addValue("updateTime", now));
-        MemoResponse updated = getMemo(id);
-        realtimePublisher.publishMemoChanged(username, Set.of(username), "memo.updated", updated.getId(), updated.getGroupId());
-        return updated;
+        return getMemo(id);
     }
 
     @Override
@@ -410,9 +408,7 @@ public class JdbcMemoService implements MemoService {
                         .addValue("deleted", value ? 0 : 1)
                         .addValue("createTime", now)
                         .addValue("updateTime", now));
-        MemoResponse updated = getMemo(id);
-        realtimePublisher.publishMemoChanged(username, Set.of(username), "memo.updated", updated.getId(), updated.getGroupId());
-        return updated;
+        return getMemo(id);
     }
 
     @Override
