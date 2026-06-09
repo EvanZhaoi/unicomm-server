@@ -40,13 +40,6 @@ CREATE TABLE IF NOT EXISTS uni_memo (
         FOREIGN KEY (group_id) REFERENCES uni_memo_group (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 主表';
 
-ALTER TABLE uni_memo
-    ADD COLUMN IF NOT EXISTS update_username VARCHAR(100) NOT NULL DEFAULT '' COMMENT '最后更新人用户名' AFTER update_time;
-
-UPDATE uni_memo
-SET update_username = owner_username
-WHERE update_username = '';
-
 CREATE TABLE IF NOT EXISTS uni_memo_related_user (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     memo_id BIGINT NOT NULL COMMENT '关联的 Memo ID',
