@@ -230,7 +230,7 @@ public class JdbcMemoService implements MemoService {
         memo = getMemo(memo.getId());
 
         // 创建 Memo 会影响列表和分组计数，所以同时广播 memo.created 和 group.updated。
-        realtimePublisher.publishMemoChanged(owner, memoRecipients(memo.getId(), owner), "memo.created", memo.getId(), memo.getGroupId());
+        realtimePublisher.publishMemoChanged(owner, memoRecipients(memo.getId()), "memo.created", memo.getId(), memo.getGroupId());
         realtimePublisher.publishGroupChanged(owner, "group.updated", memo.getGroupId());
         return memo;
     }
@@ -241,7 +241,7 @@ public class JdbcMemoService implements MemoService {
         String owner = currentUsername();
         boolean ownerCanManage = isMemoOwner(id, owner);
         requireMemoCanEdit(id, owner);
-        Set<String> recipients = memoRecipients(id, owner);
+        Set<String> recipients = memoRecipients(id);
         if (request.getGroupId() != null) {
             // 分组为空表示不调整分组；分组不为空时仍然必须校验归属。
             if (!ownerCanManage) {
@@ -275,7 +275,7 @@ public class JdbcMemoService implements MemoService {
                 throw new BusinessException(ResultCode.PERMISSION_DENIED, "只有 Memo 创建人可以调整相关人");
             }
             replaceRelatedUsers(id, owner, relatedUserRequests(request.getRelatedUsers(), request.getRelatedUsernames()));
-            recipients.addAll(memoRecipients(id, owner));
+            recipients.addAll(memoRecipients(id));
         }
         MemoResponse memo = getMemo(id);
         realtimePublisher.publishMemoChanged(owner, recipients, "memo.updated", memo.getId(), memo.getGroupId());
@@ -287,12 +287,12 @@ public class JdbcMemoService implements MemoService {
     public MemoResponse updateRelatedUsers(Long id, MemoRelatedUsersUpdateRequest request) {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
-        Set<String> recipients = memoRecipients(id, owner);
+        Set<String> recipients = memoRecipients(id);
         replaceRelatedUsers(
                 id,
                 owner,
                 request == null ? null : relatedUserRequests(request.getRelatedUsers(), request.getRelatedUsernames()));
-        recipients.addAll(memoRecipients(id, owner));
+        recipients.addAll(memoRecipients(id));
         MemoResponse memo = getMemo(id);
         realtimePublisher.publishMemoChanged(owner, recipients, "memo.related.updated", memo.getId(), memo.getGroupId());
         return memo;
@@ -303,7 +303,7 @@ public class JdbcMemoService implements MemoService {
     public void deleteMemo(Long id) {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
-        Set<String> recipients = memoRecipients(id, owner);
+        Set<String> recipients = memoRecipients(id);
         jdbcTemplate.update(
                 """
                 UPDATE uni_memo
@@ -378,7 +378,7 @@ public class JdbcMemoService implements MemoService {
                         .addValue("createTime", now)
                         .addValue("updateTime", now));
         MemoResponse updated = getMemo(id);
-        realtimePublisher.publishMemoChanged(updated.getOwnerUsername(), Set.of(username), "memo.updated", updated.getId(), updated.getGroupId());
+        realtimePublisher.publishMemoChanged(username, Set.of(username), "memo.updated", updated.getId(), updated.getGroupId());
         return updated;
     }
 
@@ -411,7 +411,7 @@ public class JdbcMemoService implements MemoService {
                         .addValue("createTime", now)
                         .addValue("updateTime", now));
         MemoResponse updated = getMemo(id);
-        realtimePublisher.publishMemoChanged(updated.getOwnerUsername(), Set.of(username), "memo.updated", updated.getId(), updated.getGroupId());
+        realtimePublisher.publishMemoChanged(username, Set.of(username), "memo.updated", updated.getId(), updated.getGroupId());
         return updated;
     }
 
@@ -803,11 +803,27 @@ public class JdbcMemoService implements MemoService {
         };
     }
 
-    private Set<String> memoRecipients(Long memoId, String owner) {
+    private Set<String> memoRecipients(Long memoId) {
         Set<String> recipients = new LinkedHashSet<>();
-        recipients.add(owner);
+        String memoOwner = memoOwnerUsername(memoId);
+        if (StringUtils.hasText(memoOwner)) {
+            recipients.add(memoOwner);
+        }
         recipients.addAll(relatedUsernames(memoId));
         return recipients;
+    }
+
+    private String memoOwnerUsername(Long memoId) {
+        List<String> owners = jdbcTemplate.queryForList(
+                """
+                SELECT owner_username
+                FROM uni_memo
+                WHERE id = :memoId AND deleted = 0
+                LIMIT 1
+                """,
+                Map.of("memoId", memoId),
+                String.class);
+        return owners.isEmpty() ? null : owners.getFirst();
     }
 
     private List<String> relatedUsernames(Long memoId) {
