@@ -34,6 +34,8 @@ public final class MemoDtos {
         private Boolean isOwner;
         private Boolean isShared;
         private String currentUserPermission;
+        private String updateUsername;
+        private String updateDisplayName;
         private List<MemoRelatedUserResponse> relatedUsers;
         private LocalDateTime createTime;
         private LocalDateTime updateTime;

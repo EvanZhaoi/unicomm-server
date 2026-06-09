@@ -39,7 +39,27 @@ public class MemoRealtimePublisher {
             String type,
             Long memoId,
             Long groupId) {
-        webSocketHandler.broadcast(MemoRealtimeEvent.memo(type, ownerUsername, recipientUsernames, memoId, groupId));
+        publishMemoChanged(ownerUsername, recipientUsernames, type, memoId, groupId, null, null, null);
+    }
+
+    public void publishMemoChanged(
+            String ownerUsername,
+            Set<String> recipientUsernames,
+            String type,
+            Long memoId,
+            Long groupId,
+            String memoTitle,
+            String actorDisplayName,
+            String contentPreview) {
+        webSocketHandler.broadcast(MemoRealtimeEvent.memo(
+                type,
+                ownerUsername,
+                recipientUsernames,
+                memoId,
+                groupId,
+                memoTitle,
+                actorDisplayName,
+                contentPreview));
     }
 
     /**

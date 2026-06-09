@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS uni_memo (
     deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除标记：0=未删除，1=已删除',
     create_time DATETIME NOT NULL COMMENT '创建时间',
     update_time DATETIME NOT NULL COMMENT '更新时间',
+    update_username VARCHAR(100) NOT NULL DEFAULT '' COMMENT '最后更新人用户名',
     deleted_time DATETIME NULL COMMENT '删除时间',
     PRIMARY KEY (id),
     KEY idx_memo_owner_list (owner_username, deleted, update_time, id),
@@ -38,6 +39,13 @@ CREATE TABLE IF NOT EXISTS uni_memo (
     CONSTRAINT fk_uni_memo_group
         FOREIGN KEY (group_id) REFERENCES uni_memo_group (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 主表';
+
+ALTER TABLE uni_memo
+    ADD COLUMN IF NOT EXISTS update_username VARCHAR(100) NOT NULL DEFAULT '' COMMENT '最后更新人用户名' AFTER update_time;
+
+UPDATE uni_memo
+SET update_username = owner_username
+WHERE update_username = '';
 
 CREATE TABLE IF NOT EXISTS uni_memo_related_user (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',

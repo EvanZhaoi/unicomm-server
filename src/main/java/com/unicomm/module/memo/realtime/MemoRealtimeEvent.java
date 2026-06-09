@@ -16,6 +16,9 @@ import java.util.Set;
  * @param recipientUsernames 本次变更影响的用户列表，包含创建者和相关人
  * @param memoId 变更的 Memo ID，分组事件为空
  * @param groupId 变更影响的分组 ID
+ * @param memoTitle Memo 标题快照，用于前端通知展示
+ * @param actorDisplayName 操作人显示名
+ * @param contentPreview 内容摘要
  * @param occurredAt 服务端事件生成时间，使用字符串避免额外 Jackson 时间模块配置
  */
 public record MemoRealtimeEvent(
@@ -25,10 +28,13 @@ public record MemoRealtimeEvent(
         List<String> recipientUsernames,
         Long memoId,
         Long groupId,
+        String memoTitle,
+        String actorDisplayName,
+        String contentPreview,
         String occurredAt) {
 
     public static MemoRealtimeEvent memo(String type, String ownerUsername, Long memoId, Long groupId) {
-        return memo(type, ownerUsername, Set.of(ownerUsername), memoId, groupId);
+        return memo(type, ownerUsername, Set.of(ownerUsername), memoId, groupId, null, null, null);
     }
 
     public static MemoRealtimeEvent memo(
@@ -36,7 +42,10 @@ public record MemoRealtimeEvent(
             String ownerUsername,
             Set<String> recipientUsernames,
             Long memoId,
-            Long groupId) {
+            Long groupId,
+            String memoTitle,
+            String actorDisplayName,
+            String contentPreview) {
         return new MemoRealtimeEvent(
                 "memo",
                 type,
@@ -44,6 +53,9 @@ public record MemoRealtimeEvent(
                 List.copyOf(recipientUsernames),
                 memoId,
                 groupId,
+                memoTitle,
+                actorDisplayName,
+                contentPreview,
                 LocalDateTime.now().toString());
     }
 
@@ -55,6 +67,9 @@ public record MemoRealtimeEvent(
                 List.of(ownerUsername),
                 null,
                 groupId,
+                null,
+                null,
+                null,
                 LocalDateTime.now().toString());
     }
 }

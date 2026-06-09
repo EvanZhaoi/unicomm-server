@@ -210,9 +210,9 @@ public class JdbcMemoService implements MemoService {
         jdbcTemplate.update(
                 """
                 INSERT INTO uni_memo
-                    (owner_username, title, content, group_id, status, deleted, create_time, update_time)
+                    (owner_username, title, content, group_id, status, deleted, create_time, update_time, update_username)
                 VALUES
-                    (:owner, :title, :content, :groupId, :status, 0, :createTime, :updateTime)
+                    (:owner, :title, :content, :groupId, :status, 0, :createTime, :updateTime, :updateUsername)
                 """,
                 new MapSqlParameterSource()
                         .addValue("owner", owner)
@@ -221,7 +221,8 @@ public class JdbcMemoService implements MemoService {
                         .addValue("groupId", groupId)
                         .addValue("status", normalizeStatus(request.getStatus()))
                         .addValue("createTime", now)
-                        .addValue("updateTime", now),
+                        .addValue("updateTime", now)
+                        .addValue("updateUsername", owner),
                 keyHolder,
                 new String[]{"id"});
 
@@ -230,7 +231,7 @@ public class JdbcMemoService implements MemoService {
         memo = getMemo(memo.getId());
 
         // 创建 Memo 会影响列表和分组计数，所以同时广播 memo.created 和 group.updated。
-        realtimePublisher.publishMemoChanged(owner, memoRecipients(memo.getId()), "memo.created", memo.getId(), memo.getGroupId());
+        publishMemoNotification(owner, memoRecipients(memo.getId()), "memo.created", memo);
         realtimePublisher.publishGroupChanged(owner, "group.updated", memo.getGroupId());
         return memo;
     }
@@ -257,7 +258,8 @@ public class JdbcMemoService implements MemoService {
                     content = :content,
                     group_id = CASE WHEN :canManage = 1 THEN COALESCE(:groupId, group_id) ELSE group_id END,
                     status = :status,
-                    update_time = :updateTime
+                    update_time = :updateTime,
+                    update_username = :updateUsername
                 WHERE id = :id AND deleted = 0
                 """,
                 new MapSqlParameterSource()
@@ -268,7 +270,8 @@ public class JdbcMemoService implements MemoService {
                         .addValue("content", request.getContent() == null ? "" : request.getContent())
                         .addValue("groupId", request.getGroupId())
                         .addValue("status", normalizeStatus(request.getStatus()))
-                        .addValue("updateTime", LocalDateTime.now()));
+                        .addValue("updateTime", LocalDateTime.now())
+                        .addValue("updateUsername", owner));
 
         if (request.getRelatedUsers() != null || request.getRelatedUsernames() != null) {
             if (!ownerCanManage) {
@@ -278,7 +281,7 @@ public class JdbcMemoService implements MemoService {
             recipients.addAll(memoRecipients(id));
         }
         MemoResponse memo = getMemo(id);
-        realtimePublisher.publishMemoChanged(owner, recipients, "memo.updated", memo.getId(), memo.getGroupId());
+        publishMemoNotification(owner, recipients, "memo.updated", memo);
         return memo;
     }
 
@@ -292,9 +295,10 @@ public class JdbcMemoService implements MemoService {
                 id,
                 owner,
                 request == null ? null : relatedUserRequests(request.getRelatedUsers(), request.getRelatedUsernames()));
+        touchMemo(id, owner);
         recipients.addAll(memoRecipients(id));
         MemoResponse memo = getMemo(id);
-        realtimePublisher.publishMemoChanged(owner, recipients, "memo.related.updated", memo.getId(), memo.getGroupId());
+        publishMemoNotification(owner, recipients, "memo.related.updated", memo);
         return memo;
     }
 
@@ -303,18 +307,23 @@ public class JdbcMemoService implements MemoService {
     public void deleteMemo(Long id) {
         String owner = currentUsername();
         requireMemoForOwner(id, owner);
+        MemoResponse memo = getMemo(id);
         Set<String> recipients = memoRecipients(id);
         jdbcTemplate.update(
                 """
                 UPDATE uni_memo
-                SET deleted = 1, deleted_time = :deletedTime, update_time = :updateTime
+                SET deleted = 1,
+                    deleted_time = :deletedTime,
+                    update_time = :updateTime,
+                    update_username = :updateUsername
                 WHERE id = :id AND owner_username = :owner AND deleted = 0
                 """,
                 new MapSqlParameterSource()
                         .addValue("id", id)
                         .addValue("owner", owner)
                         .addValue("deletedTime", LocalDateTime.now())
-                        .addValue("updateTime", LocalDateTime.now()));
+                        .addValue("updateTime", LocalDateTime.now())
+                        .addValue("updateUsername", owner));
         jdbcTemplate.update(
                 """
                 UPDATE uni_memo_related_user
@@ -345,7 +354,7 @@ public class JdbcMemoService implements MemoService {
                         .addValue("id", id)
                         .addValue("owner", owner)
                         .addValue("updateTime", LocalDateTime.now()));
-        realtimePublisher.publishMemoChanged(owner, recipients, "memo.deleted", id, null);
+        publishMemoNotification(owner, recipients, "memo.deleted", memo);
         realtimePublisher.publishGroupChanged(owner, "group.updated", null);
     }
 
@@ -860,6 +869,7 @@ public class JdbcMemoService implements MemoService {
         memo.setCurrentUserPermission(isOwner ? PERMISSION_OWNER : memoPermission(memo.getId(), currentUsername));
         memo.setRelatedUsers(relatedUsers);
         memo.setIsFavorite(isFavorite(memo.getId(), currentUsername));
+        memo.setUpdateDisplayName(displayName(memo.getUpdateUsername()));
         return memo;
     }
 
@@ -882,6 +892,55 @@ public class JdbcMemoService implements MemoService {
             memo.setRelatedUsers(List.of());
         }
         return memos;
+    }
+
+    private void touchMemo(Long id, String updateUsername) {
+        jdbcTemplate.update(
+                """
+                UPDATE uni_memo
+                SET update_time = :updateTime,
+                    update_username = :updateUsername
+                WHERE id = :id AND deleted = 0
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", id)
+                        .addValue("updateTime", LocalDateTime.now())
+                        .addValue("updateUsername", updateUsername));
+    }
+
+    private void publishMemoNotification(String actorUsername, Set<String> recipients, String type, MemoResponse memo) {
+        realtimePublisher.publishMemoChanged(
+                actorUsername,
+                recipients,
+                type,
+                memo.getId(),
+                memo.getGroupId(),
+                memo.getTitle(),
+                displayName(actorUsername),
+                contentPreview(memo.getContent()));
+    }
+
+    private String displayName(String username) {
+        if (!StringUtils.hasText(username)) {
+            return "";
+        }
+        MemberSearchResponse member = findMember(username);
+        return member == null || !StringUtils.hasText(member.getDisplayName()) ? username : member.getDisplayName();
+    }
+
+    private String contentPreview(String content) {
+        if (!StringUtils.hasText(content)) {
+            return "";
+        }
+        String normalized = content
+                .replaceAll("(?s)```.*?```", " ")
+                .replaceAll("[#>*_`\\[\\]()>\\-]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (normalized.length() <= 120) {
+            return normalized;
+        }
+        return normalized.substring(0, 120) + "...";
     }
 
     private List<MemoRelatedUserResponse> listRelatedUsers(Long memoId) {
@@ -968,6 +1027,7 @@ public class JdbcMemoService implements MemoService {
                 .isTop(rs.getBoolean("is_top"))
                 .isFavorite(hasColumn(rs, "is_favorite") && rs.getBoolean("is_favorite"))
                 .currentUserPermission(hasColumn(rs, "current_user_permission") ? rs.getString("current_user_permission") : null)
+                .updateUsername(rs.getString("update_username"))
                 .createTime(toLocalDateTime(rs, "create_time"))
                 .updateTime(toLocalDateTime(rs, "update_time"))
                 .build();
