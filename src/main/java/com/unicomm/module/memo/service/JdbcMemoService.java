@@ -43,13 +43,15 @@ import java.util.Set;
 public class JdbcMemoService implements MemoService {
 
     /*
-     * 当前 Memo 模块只保留 MySQL 持久化实现。
+     * 当前 Memo 模块只保留 MySQL + NamedParameterJdbcTemplate 持久化实现。
      *
      * 设计约束：
      * 1. Memo 仍有明确 owner_username；列表和详情同时允许 owner 与相关人查看。
      * 2. 删除采用逻辑删除，避免误删后无法恢复，也便于后续做回收站。
      * 3. 写操作完成后发布 WebSocket 事件，桌面端没有刷新按钮，依赖事件触发重新拉取。
      * 4. 使用 NamedParameterJdbcTemplate 是为了让 SQL 字段和业务含义更直接，当前阶段不引入 ORM。
+     * 5. 收藏/置顶是“用户 + Memo”的个人状态，不能写回 Memo 主表，否则多人共享场景会互相影响。
+     * 6. 相关人权限由后端最终判断，前端只负责展示只读/可编辑状态，不能作为安全边界。
      */
     private static final String DEFAULT_GROUP_NAME = "我的备忘";
     private static final String DEFAULT_GROUP_COLOR = "#6B7280";
@@ -87,6 +89,7 @@ public class JdbcMemoService implements MemoService {
         params.put("offset", offset);
 
         // 统一拼接 WHERE，count 查询和列表查询共用同一组过滤条件，避免分页总数和列表内容不一致。
+        // 可见范围包含“我创建的”和“别人共享给我的”，这是“全部 Memo”和“与我相关”的共同权限基础。
         StringBuilder where = new StringBuilder("""
                  WHERE m.deleted = 0
                    AND (m.owner_username = :owner
@@ -138,6 +141,7 @@ public class JdbcMemoService implements MemoService {
                 params,
                 Long.class);
 
+        // 排序策略：个人置顶优先，其次按最后更新时间倒序，最后用 id 倒序保证相同时间下列表稳定。
         List<MemoResponse> list = jdbcTemplate.query(
                 """
                 SELECT m.*,
@@ -231,6 +235,7 @@ public class JdbcMemoService implements MemoService {
         memo = getMemo(memo.getId());
 
         // 创建 Memo 会影响列表和分组计数，所以同时广播 memo.created 和 group.updated。
+        // WebSocket 只广播变化事件和摘要，前端收到后重新拉取 HTTP 列表，避免形成第二套数据查询通道。
         publishMemoNotification(owner, memoRecipients(memo.getId()), "memo.created", memo);
         realtimePublisher.publishGroupChanged(owner, "group.updated", memo.getGroupId());
         return memo;
@@ -245,6 +250,7 @@ public class JdbcMemoService implements MemoService {
         Set<String> recipients = memoRecipients(id);
         if (request.getGroupId() != null) {
             // 分组为空表示不调整分组；分组不为空时仍然必须校验归属。
+            // 相关人即便有 edit 权限，也不能把共享 Memo 移入自己的分组，否则会破坏创建人的分类体系。
             if (!ownerCanManage) {
                 throw new BusinessException(ResultCode.PERMISSION_DENIED, "只有 Memo 创建人可以调整分组");
             }
@@ -277,6 +283,7 @@ public class JdbcMemoService implements MemoService {
             if (!ownerCanManage) {
                 throw new BusinessException(ResultCode.PERMISSION_DENIED, "只有 Memo 创建人可以调整相关人");
             }
+            // 相关人列表采用整体替换模型，前端一次提交完整选择结果，服务端负责去重和过滤创建人自己。
             replaceRelatedUsers(id, owner, relatedUserRequests(request.getRelatedUsers(), request.getRelatedUsernames()));
             recipients.addAll(memoRecipients(id));
         }
@@ -368,6 +375,7 @@ public class JdbcMemoService implements MemoService {
 
         boolean value = Boolean.TRUE.equals(request.getValue());
         LocalDateTime now = LocalDateTime.now();
+        // 置顶是个人视图状态。即使 Memo 是共享的，也只影响当前用户自己的列表排序。
         jdbcTemplate.update(
                 """
                 INSERT INTO uni_memo_top
@@ -399,6 +407,7 @@ public class JdbcMemoService implements MemoService {
 
         boolean value = Boolean.TRUE.equals(request.getValue());
         LocalDateTime now = LocalDateTime.now();
+        // 收藏是个人视图状态。共享 Memo 被某人收藏，不应影响创建人或其他相关人的收藏列表。
         jdbcTemplate.update(
                 """
                 INSERT INTO uni_memo_favorite
@@ -607,6 +616,12 @@ public class JdbcMemoService implements MemoService {
             return null;
         }
 
+        /*
+         * 权限优先级：
+         * 1. 创建人固定拥有 owner 权限。
+         * 2. 相关人只能拥有 view/edit 权限。
+         * 3. 如果同一用户意外同时出现在两个来源，owner 永远优先。
+         */
         List<String> permissions = jdbcTemplate.queryForList(
                 """
                 SELECT permission
@@ -846,6 +861,7 @@ public class JdbcMemoService implements MemoService {
     }
 
     private Set<String> memoRecipients(Long memoId) {
+        // 接收人包含创建人和所有相关人；前端收到事件后会过滤自己触发的通知。
         Set<String> recipients = new LinkedHashSet<>();
         String memoOwner = memoOwnerUsername(memoId);
         if (StringUtils.hasText(memoOwner)) {
@@ -919,6 +935,10 @@ public class JdbcMemoService implements MemoService {
     }
 
     private List<MemoResponse> enrichMemoListResponses(List<MemoResponse> memos, String currentUsername) {
+        /*
+         * 列表接口保持轻量：不加载 relatedUsers 明细，避免每页列表产生 N 次人员查询。
+         * 右侧详情打开时再加载完整相关人，列表滚动和分页会更稳。
+         */
         for (MemoResponse memo : memos) {
             boolean isOwner = memo.getOwnerUsername().equals(currentUsername);
             memo.setIsOwner(isOwner);
@@ -946,6 +966,7 @@ public class JdbcMemoService implements MemoService {
     }
 
     private void publishMemoNotification(String actorUsername, Set<String> recipients, String type, MemoResponse memo) {
+        // 通知摘要在服务端生成，桌面端弹系统通知时不需要再为了标题/更新人/摘要查详情。
         realtimePublisher.publishMemoChanged(
                 actorUsername,
                 recipients,
