@@ -15,8 +15,10 @@ import org.springframework.util.StringUtils;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
@@ -26,42 +28,46 @@ public class DeviceTrustService {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
+    private final Map<String, Object> userDeviceLocks = new ConcurrentHashMap<>();
 
     public Optional<String> createVerificationIfDeviceUntrusted(String username, String email, DesktopVerifyRequest request) {
         if (!StringUtils.hasText(request.getDeviceId())) {
             return Optional.empty();
         }
-        if (isTrusted(username, request.getDeviceId())) {
-            touchTrustedDevice(username, request);
-            return Optional.empty();
+        Object lock = userDeviceLocks.computeIfAbsent(username, ignored -> new Object());
+        synchronized (lock) {
+            if (isTrusted(username, request.getDeviceId())) {
+                touchTrustedDevice(username, request);
+                return Optional.empty();
+            }
+            if (!hasAnyTrustedDevice(username)) {
+                trustDevice(username, request);
+                log.info("首次绑定设备: username={}, deviceId={}, computerName={}",
+                        username, request.getDeviceId(), request.getComputerName());
+                return Optional.empty();
+            }
+
+            String verificationId = UUID.randomUUID().toString();
+            String code = String.format("%06d", RANDOM.nextInt(1_000_000));
+            MapSqlParameterSource params = baseDeviceParams(username, request)
+                    .addValue("verificationId", verificationId)
+                    .addValue("codeHash", hashCode(code))
+                    .addValue("expireTime", LocalDateTime.now().plusMinutes(10));
+
+            jdbcTemplate.update("""
+                    INSERT INTO uni_device_verification
+                        (verification_id, username, domain_name, device_id, computer_name, os, os_version,
+                         app_version, code_hash, verified, expire_time, create_time, update_time)
+                    VALUES
+                        (:verificationId, :username, :domain, :deviceId, :computerName, :os, :osVersion,
+                         :appVersion, :codeHash, 0, :expireTime, NOW(), NOW())
+                    """, params);
+
+            // TODO 接入真实邮件服务后，在这里把 code 发送到 employee email。
+            log.info("测试阶段设备验证码: username={}, email={}, deviceId={}, code={}",
+                    username, email, request.getDeviceId(), code);
+            return Optional.of(verificationId);
         }
-        if (!hasAnyTrustedDevice(username)) {
-            trustDevice(username, request);
-            log.info("首次绑定设备: username={}, deviceId={}, computerName={}",
-                    username, request.getDeviceId(), request.getComputerName());
-            return Optional.empty();
-        }
-
-        String verificationId = UUID.randomUUID().toString();
-        String code = String.format("%06d", RANDOM.nextInt(1_000_000));
-        MapSqlParameterSource params = baseDeviceParams(username, request)
-                .addValue("verificationId", verificationId)
-                .addValue("codeHash", hashCode(code))
-                .addValue("expireTime", LocalDateTime.now().plusMinutes(10));
-
-        jdbcTemplate.update("""
-                INSERT INTO uni_device_verification
-                    (verification_id, username, domain_name, device_id, computer_name, os, os_version,
-                     app_version, code_hash, verified, expire_time, create_time, update_time)
-                VALUES
-                    (:verificationId, :username, :domain, :deviceId, :computerName, :os, :osVersion,
-                     :appVersion, :codeHash, 0, :expireTime, NOW(), NOW())
-                """, params);
-
-        // TODO 接入真实邮件服务后，在这里把 code 发送到 employee email。
-        log.info("测试阶段设备验证码: username={}, email={}, deviceId={}, code={}",
-                username, email, request.getDeviceId(), code);
-        return Optional.of(verificationId);
     }
 
     public DesktopVerifyRequest verifyCodeAndTrustDevice(String verificationId, String code) {
