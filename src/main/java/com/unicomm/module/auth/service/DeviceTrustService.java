@@ -35,6 +35,12 @@ public class DeviceTrustService {
             touchTrustedDevice(username, request);
             return Optional.empty();
         }
+        if (!hasAnyTrustedDevice(username)) {
+            trustDevice(username, request);
+            log.info("首次绑定设备: username={}, deviceId={}, computerName={}",
+                    username, request.getDeviceId(), request.getComputerName());
+            return Optional.empty();
+        }
 
         String verificationId = UUID.randomUUID().toString();
         String code = String.format("%06d", RANDOM.nextInt(1_000_000));
@@ -95,6 +101,16 @@ public class DeviceTrustService {
                 """, new MapSqlParameterSource()
                 .addValue("username", username)
                 .addValue("deviceId", deviceId), Integer.class);
+        return count != null && count > 0;
+    }
+
+    private boolean hasAnyTrustedDevice(String username) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM uni_device_trust
+                WHERE username = :username
+                  AND trust_status = 'trusted'
+                """, new MapSqlParameterSource("username", username), Integer.class);
         return count != null && count > 0;
     }
 
