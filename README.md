@@ -31,6 +31,10 @@ src/main/java/com/unicomm/
 └── module/
     ├── auth/                        # 认证模块
     │   ├── controller/AuthController.java
+    │   ├── integration/             # 人员信息适配器
+    │   │   ├── EmployeeInfo.java
+    │   │   ├── PersonnelProvider.java
+    │   │   └── MockPersonnelProvider.java
     │   ├── service/AuthService.java
     │   ├── service/impl/AuthServiceImpl.java
     │   ├── dto/DesktopVerifyRequest.java
@@ -145,6 +149,8 @@ NODE
 除 `/api/v1/auth/desktop/verify` 和 Swagger 文档外，`/api/v1/**` 接口都需要携带后端签发的 Sa-Token。桌面端会同时发送 `unicomm-token` 和 `Authorization: Bearer ...`，后端当前以 `unicomm-token` 作为 token-name。
 
 Memo 模块不再使用开发期默认用户名兜底。创建者、相关人和权限判断都来自 Token 中的 loginId；未登录或 Token 失效时会返回 401。
+
+测试阶段不接入真实公司人员 API。认证和成员搜索统一通过 `PersonnelProvider` 读取人员信息，当前实现为 `MockPersonnelProvider`，仅用于本地开发、测试和演示。未来接入真实 HR/OA/LDAP/AD 时，新增对应 provider 并通过配置切换即可，Memo 权限逻辑不需要直接依赖具体人员系统。
 
 ### Memo 相关人权限
 
