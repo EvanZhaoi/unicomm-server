@@ -1,41 +1,34 @@
 package com.unicomm.module.auth.service;
 
+import com.unicomm.module.auth.entity.UserSnapshotEntity;
 import com.unicomm.module.auth.integration.EmployeeInfo;
+import com.unicomm.module.auth.mapper.UserSnapshotMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
 public class UserSnapshotService {
 
-    private final NamedParameterJdbcTemplate jdbcTemplate;
+    private static final String SOURCE_SYSTEM_MOCK = "mock";
 
+    private final UserSnapshotMapper userSnapshotMapper;
+
+    /**
+     * 保存或更新当前认证用户的人员快照。
+     *
+     * <p>这是第一处迁移到 MyBatis-Plus 的低风险写入逻辑。复杂 Memo 查询暂时继续使用
+     * JdbcTemplate，等权限和分页有更多自动化测试后再拆 Repository。</p>
+     */
     public void saveOrUpdate(EmployeeInfo employee) {
-        MapSqlParameterSource params = new MapSqlParameterSource()
-                .addValue("username", employee.username())
-                .addValue("employeeNo", employee.employeeNo())
-                .addValue("displayName", employee.displayName())
-                .addValue("departmentName", employee.departmentName())
-                .addValue("email", employee.email())
-                .addValue("status", employee.status());
-
-        jdbcTemplate.update("""
-                INSERT INTO uni_user_snapshot
-                    (username, employee_no, display_name, department_name, email, source_system,
-                     status_snapshot, last_sync_time, create_time, update_time)
-                VALUES
-                    (:username, :employeeNo, :displayName, :departmentName, :email, 'mock',
-                     :status, NOW(), NOW(), NOW())
-                ON DUPLICATE KEY UPDATE
-                    employee_no = VALUES(employee_no),
-                    display_name = VALUES(display_name),
-                    department_name = VALUES(department_name),
-                    email = VALUES(email),
-                    status_snapshot = VALUES(status_snapshot),
-                    last_sync_time = NOW(),
-                    update_time = NOW()
-                """, params);
+        UserSnapshotEntity entity = new UserSnapshotEntity();
+        entity.setUsername(employee.username());
+        entity.setEmployeeNo(employee.employeeNo());
+        entity.setDisplayName(employee.displayName());
+        entity.setDepartmentName(employee.departmentName());
+        entity.setEmail(employee.email());
+        entity.setSourceSystem(SOURCE_SYSTEM_MOCK);
+        entity.setStatusSnapshot(employee.status());
+        userSnapshotMapper.upsertSnapshot(entity);
     }
 }

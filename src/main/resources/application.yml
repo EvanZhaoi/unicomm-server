@@ -11,12 +11,13 @@ spring:
       schema-locations: classpath:db/schema-mysql.sql
       encoding: UTF-8
 
-  # Redis 配置（后续需要集中缓存或会话存储时启用）
-  # redis:
-  #   host: localhost
-  #   port: 6379
-  #   password: your_password
-  #   database: 0
+  data:
+    redis:
+      host: ${UNICOMM_REDIS_HOST:localhost}
+      port: ${UNICOMM_REDIS_PORT:6379}
+      password: ${UNICOMM_REDIS_PASSWORD:}
+      database: ${UNICOMM_REDIS_DATABASE:0}
+      timeout: 2s
 
   # Jackson 配置
   jackson:
@@ -39,6 +40,14 @@ unicomm:
     url: ${UNICOMM_DB_URL:jdbc:mysql://localhost:3306/unicomm?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
     username: ${UNICOMM_DB_USERNAME:root}
     password: ${UNICOMM_DB_PASSWORD:}
+  redis:
+    enabled: ${UNICOMM_REDIS_ENABLED:false}
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
 
 # Sa-Token 配置
 sa-token:
