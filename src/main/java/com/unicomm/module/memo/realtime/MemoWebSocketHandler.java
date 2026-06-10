@@ -9,6 +9,7 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,7 +35,8 @@ public class MemoWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         sessions.add(session);
-        log.info("WebSocket connected: sessionId={}, active={}", session.getId(), sessions.size());
+        log.info("WebSocket connected: sessionId={}, username={}, active={}",
+                session.getId(), sessionUsername(session), sessions.size());
     }
 
     @Override
@@ -59,7 +61,8 @@ public class MemoWebSocketHandler extends TextWebSocketHandler {
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         sessions.remove(session);
-        log.info("WebSocket disconnected: sessionId={}, status={}, active={}", session.getId(), status, sessions.size());
+        log.info("WebSocket disconnected: sessionId={}, username={}, status={}, active={}",
+                session.getId(), sessionUsername(session), status, sessions.size());
     }
 
     public void broadcast(MemoRealtimeEvent event) {
@@ -73,12 +76,37 @@ public class MemoWebSocketHandler extends TextWebSocketHandler {
 
         // 广播前清理已经关闭的连接，避免长期运行后 sessions 集合积累无效对象。
         sessions.removeIf(session -> !session.isOpen());
+        Set<String> recipients = eventRecipients(event);
         for (WebSocketSession session : sessions) {
+            if (!shouldSendTo(session, recipients)) {
+                continue;
+            }
             try {
                 session.sendMessage(new TextMessage(payload));
             } catch (IOException error) {
                 log.warn("Send WebSocket event failed: sessionId={}, event={}", session.getId(), event, error);
             }
         }
+    }
+
+    private Set<String> eventRecipients(MemoRealtimeEvent event) {
+        Set<String> recipients = new HashSet<>();
+        if (event.recipientUsernames() != null) {
+            recipients.addAll(event.recipientUsernames());
+        }
+        if (event.ownerUsername() != null) {
+            recipients.add(event.ownerUsername());
+        }
+        return recipients;
+    }
+
+    private boolean shouldSendTo(WebSocketSession session, Set<String> recipients) {
+        String username = sessionUsername(session);
+        return username != null && recipients.contains(username);
+    }
+
+    private String sessionUsername(WebSocketSession session) {
+        Object username = session.getAttributes().get(MemoWebSocketAuthInterceptor.ATTR_USERNAME);
+        return username == null ? null : String.valueOf(username);
     }
 }
