@@ -103,4 +103,10 @@ public class DesktopVerifyResponse {
      */
     @Schema(description = "访问令牌 (由服务端签发)")
     private String accessToken;
+
+    @Schema(description = "是否需要设备验证码")
+    private Boolean deviceVerificationRequired;
+
+    @Schema(description = "设备验证码流程ID")
+    private String verificationId;
 }

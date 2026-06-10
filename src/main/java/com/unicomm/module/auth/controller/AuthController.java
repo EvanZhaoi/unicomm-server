@@ -1,8 +1,10 @@
 package com.unicomm.module.auth.controller;
 
 import com.unicomm.common.Result;
+import com.unicomm.module.auth.dto.DeviceVerificationRequest;
 import com.unicomm.module.auth.dto.DesktopVerifyRequest;
 import com.unicomm.module.auth.dto.DesktopVerifyResponse;
+import com.unicomm.module.auth.dto.TokenRefreshResponse;
 import com.unicomm.module.auth.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -119,5 +121,18 @@ public class AuthController {
         DesktopVerifyResponse response = authService.desktopVerify(request);
 
         return Result.success(response);
+    }
+
+    @PostMapping("/desktop/device/verify")
+    @Operation(summary = "桌面端设备验证码校验")
+    public Result<DesktopVerifyResponse> verifyDevice(
+            @Valid @RequestBody DeviceVerificationRequest request) {
+        return Result.success(authService.verifyDevice(request));
+    }
+
+    @PostMapping("/token/refresh")
+    @Operation(summary = "刷新当前 Token 活跃时间")
+    public Result<TokenRefreshResponse> refreshToken() {
+        return Result.success(authService.refreshToken());
     }
 }

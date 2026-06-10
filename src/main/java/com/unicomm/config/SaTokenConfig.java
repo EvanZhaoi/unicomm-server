@@ -54,6 +54,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                 .addPathPatterns("/api/v1/**")
                 .excludePathPatterns(
                         "/api/v1/auth/desktop/verify",
+                        "/api/v1/auth/desktop/device/verify",
                         "/swagger-ui/**",
                         "/swagger-ui.html",
                         "/v3/api-docs/**"

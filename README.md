@@ -152,6 +152,8 @@ Memo 模块不再使用开发期默认用户名兜底。创建者、相关人和
 
 测试阶段不接入真实公司人员 API。认证和成员搜索统一通过 `PersonnelProvider` 读取人员信息，当前实现为 `MockPersonnelProvider`，仅用于本地开发、测试和演示。未来接入真实 HR/OA/LDAP/AD 时，新增对应 provider 并通过配置切换即可，Memo 权限逻辑不需要直接依赖具体人员系统。
 
+认证成功时会写入 `uni_user_snapshot` 和 `uni_auth_audit`。如果当前 `username + deviceId` 不在 `uni_device_trust` 中，后端会返回 `deviceVerificationRequired=true` 和 `verificationId`，前端显示验证码输入框；测试阶段验证码会写入后端日志，真实邮件发送位置保留 TODO。验证码通过后设备会被写入信任表并签发 Token。已保存 Session 启动时会调用 `/api/v1/auth/token/refresh` 刷新本地会话过期时间。
+
 ### Memo 相关人权限
 
 Memo 以创建人为 `owner`，相关人支持两种权限：

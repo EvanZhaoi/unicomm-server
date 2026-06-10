@@ -107,6 +107,11 @@ public enum ResultCode {
      */
     PERMISSION_DENIED(403, "权限不足"),
 
+    /**
+     * 设备验证码无效或过期.
+     */
+    DEVICE_VERIFICATION_INVALID(400, "设备验证码无效或已过期"),
+
     /* ==================== 服务端错误 ==================== */
 
     /**

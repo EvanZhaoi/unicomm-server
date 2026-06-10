@@ -2,6 +2,8 @@ package com.unicomm.module.auth.service;
 
 import com.unicomm.module.auth.dto.DesktopVerifyRequest;
 import com.unicomm.module.auth.dto.DesktopVerifyResponse;
+import com.unicomm.module.auth.dto.DeviceVerificationRequest;
+import com.unicomm.module.auth.dto.TokenRefreshResponse;
 import com.unicomm.module.member.dto.MemberSearchResponse;
 
 import java.util.List;
@@ -56,6 +58,10 @@ public interface AuthService {
      * @see DesktopVerifyResponse
      */
     DesktopVerifyResponse desktopVerify(DesktopVerifyRequest request);
+
+    DesktopVerifyResponse verifyDevice(DeviceVerificationRequest request);
+
+    TokenRefreshResponse refreshToken();
 
     List<MemberSearchResponse> searchMembers(String keyword, Integer limit);
 }

@@ -3,17 +3,23 @@ package com.unicomm.module.auth.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.unicomm.common.BusinessException;
 import com.unicomm.common.ResultCode;
+import com.unicomm.module.auth.dto.DeviceVerificationRequest;
 import com.unicomm.module.auth.dto.DesktopVerifyRequest;
 import com.unicomm.module.auth.dto.DesktopVerifyResponse;
+import com.unicomm.module.auth.dto.TokenRefreshResponse;
 import com.unicomm.module.auth.integration.EmployeeInfo;
 import com.unicomm.module.auth.integration.PersonnelProvider;
 import com.unicomm.module.auth.service.AuthService;
+import com.unicomm.module.auth.service.AuthAuditService;
+import com.unicomm.module.auth.service.DeviceTrustService;
+import com.unicomm.module.auth.service.UserSnapshotService;
 import com.unicomm.module.member.dto.MemberSearchResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 认证服务实现类.
@@ -52,6 +58,9 @@ import java.util.List;
 public class AuthServiceImpl implements AuthService {
 
     private final PersonnelProvider personnelProvider;
+    private final UserSnapshotService userSnapshotService;
+    private final AuthAuditService authAuditService;
+    private final DeviceTrustService deviceTrustService;
 
     /**
      * 桌面端 Windows 用户认证.
@@ -85,37 +94,61 @@ public class AuthServiceImpl implements AuthService {
         if (emp == null) {
             log.warn("人员适配器返回: 用户不存在 - domain={}, username={}",
                     request.getDomain(), request.getUsername());
+            authAuditService.record(request.getUsername(), "desktop_verify", "fail", request, "用户不存在");
             throw new BusinessException(ResultCode.USER_NOT_FOUND);
         }
 
         // ---- 3. 检查员工状态 ----
         if (!emp.active()) {
             log.warn("人员适配器返回: 用户已停用 - username={}, status={}", emp.username(), emp.status());
+            authAuditService.record(emp.username(), "desktop_verify", "fail", request, "用户已停用");
             throw new BusinessException(ResultCode.USER_DISABLED);
         }
 
-        // ---- 4. 签发 Sa-Token Token ----
-        // 使用 username 作为会话标识，而非 userId
-        StpUtil.login(emp.username());
-        String token = StpUtil.getTokenValue();
+        userSnapshotService.saveOrUpdate(emp);
 
-        // ---- 5. TODO: 接入正式人员接口后保存认证审计记录 ----
+        Optional<String> verificationId = deviceTrustService
+                .createVerificationIfDeviceUntrusted(emp.username(), emp.email(), request);
+        if (verificationId.isPresent()) {
+            authAuditService.record(emp.username(), "desktop_verify", "verification_required",
+                    request, "设备未信任，已生成验证码");
+            return baseResponse(emp)
+                    .deviceVerificationRequired(true)
+                    .verificationId(verificationId.get())
+                    .build();
+        }
 
-        // ---- 6. 构建并返回响应 ----
-        DesktopVerifyResponse response = DesktopVerifyResponse.builder()
-                .username(emp.username())
-                .employeeNo(emp.employeeNo())
-                .displayName(emp.displayName())
-                .departmentName(emp.departmentName())
-                .email(emp.email())
-                .permissions(List.of("memo:read", "memo:write"))
-                .accessToken(token)
-                .build();
+        DesktopVerifyResponse response = issueLoginResponse(emp);
+        authAuditService.record(emp.username(), "desktop_verify", "success", request, "认证成功");
 
         log.info("用户认证成功: username={}, employeeNo={}",
                 emp.username(), emp.employeeNo());
 
         return response;
+    }
+
+    @Override
+    public DesktopVerifyResponse verifyDevice(DeviceVerificationRequest request) {
+        DesktopVerifyRequest originalRequest = deviceTrustService
+                .verifyCodeAndTrustDevice(request.getVerificationId(), request.getCode());
+        EmployeeInfo emp = findActiveEmployee(originalRequest);
+        userSnapshotService.saveOrUpdate(emp);
+        DesktopVerifyResponse response = issueLoginResponse(emp);
+        authAuditService.record(emp.username(), "device_verify", "success", originalRequest, "设备验证码通过");
+        return response;
+    }
+
+    @Override
+    public TokenRefreshResponse refreshToken() {
+        StpUtil.checkLogin();
+        StpUtil.updateLastActiveToNow();
+        String username = StpUtil.getLoginIdAsString();
+        String token = StpUtil.getTokenValue();
+        authAuditService.record(username, "token_refresh", "success", null, "Token 活跃时间刷新成功");
+        return TokenRefreshResponse.builder()
+                .accessToken(token)
+                .expiresAt(System.currentTimeMillis() + StpUtil.getTokenTimeout(token) * 1000)
+                .build();
     }
 
     @Override
@@ -131,5 +164,36 @@ public class AuthServiceImpl implements AuthService {
                         .email(employee.email())
                         .build())
                 .toList();
+    }
+
+    private EmployeeInfo findActiveEmployee(DesktopVerifyRequest request) {
+        EmployeeInfo emp = personnelProvider
+                .findByWindowsAccount(request.getDomain(), request.getUsername())
+                .orElse(null);
+        if (emp == null) {
+            throw new BusinessException(ResultCode.USER_NOT_FOUND);
+        }
+        if (!emp.active()) {
+            throw new BusinessException(ResultCode.USER_DISABLED);
+        }
+        return emp;
+    }
+
+    private DesktopVerifyResponse issueLoginResponse(EmployeeInfo emp) {
+        StpUtil.login(emp.username());
+        return baseResponse(emp)
+                .accessToken(StpUtil.getTokenValue())
+                .deviceVerificationRequired(false)
+                .build();
+    }
+
+    private DesktopVerifyResponse.DesktopVerifyResponseBuilder baseResponse(EmployeeInfo emp) {
+        return DesktopVerifyResponse.builder()
+                .username(emp.username())
+                .employeeNo(emp.employeeNo())
+                .displayName(emp.displayName())
+                .departmentName(emp.departmentName())
+                .email(emp.email())
+                .permissions(List.of("memo:read", "memo:write"));
     }
 }

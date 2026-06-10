@@ -89,3 +89,73 @@ CREATE TABLE IF NOT EXISTS uni_memo_favorite (
     CONSTRAINT fk_uni_memo_favorite_memo
         FOREIGN KEY (memo_id) REFERENCES uni_memo (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Memo 用户收藏表';
+
+CREATE TABLE IF NOT EXISTS uni_user_snapshot (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    username VARCHAR(128) NOT NULL COMMENT 'Windows 用户名',
+    employee_no VARCHAR(32) NULL COMMENT '员工工号',
+    display_name VARCHAR(128) NULL COMMENT '显示名称',
+    department_name VARCHAR(128) NULL COMMENT '部门名称',
+    email VARCHAR(128) NULL COMMENT '邮箱',
+    source_system VARCHAR(64) NULL COMMENT '来源系统标识',
+    status_snapshot VARCHAR(20) NULL COMMENT '状态快照：active=启用，inactive=停用',
+    last_sync_time DATETIME NULL COMMENT '最后同步时间',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_user_snapshot_username (username),
+    KEY idx_user_snapshot_employee_no (employee_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户快照表';
+
+CREATE TABLE IF NOT EXISTS uni_auth_audit (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    username VARCHAR(128) NULL COMMENT 'Windows 用户名',
+    action VARCHAR(64) NOT NULL COMMENT '认证动作：desktop_verify/token_refresh/device_verify',
+    result VARCHAR(32) NOT NULL COMMENT '结果：success/fail/verification_required',
+    device_id VARCHAR(128) NULL COMMENT '设备唯一标识',
+    computer_name VARCHAR(128) NULL COMMENT '计算机名称',
+    ip_address VARCHAR(64) NULL COMMENT '客户端IP',
+    message VARCHAR(500) NULL COMMENT '审计说明',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (id),
+    KEY idx_auth_audit_username_time (username, create_time),
+    KEY idx_auth_audit_action_time (action, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='认证审计表';
+
+CREATE TABLE IF NOT EXISTS uni_device_trust (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    username VARCHAR(128) NOT NULL COMMENT '绑定用户名',
+    device_id VARCHAR(128) NOT NULL COMMENT '设备唯一标识',
+    computer_name VARCHAR(128) NULL COMMENT '计算机名称',
+    os VARCHAR(64) NULL COMMENT '操作系统',
+    os_version VARCHAR(128) NULL COMMENT '操作系统版本',
+    app_version VARCHAR(32) NULL COMMENT '应用版本',
+    trust_status VARCHAR(32) NOT NULL DEFAULT 'trusted' COMMENT '信任状态：trusted=已信任，revoked=已撤销',
+    first_trusted_time DATETIME NOT NULL COMMENT '首次信任时间',
+    last_active_time DATETIME NOT NULL COMMENT '最后活跃时间',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_device_trust_user_device (username, device_id),
+    KEY idx_device_trust_username (username, trust_status, last_active_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='设备信任表';
+
+CREATE TABLE IF NOT EXISTS uni_device_verification (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    verification_id VARCHAR(64) NOT NULL COMMENT '验证码流程ID',
+    username VARCHAR(128) NOT NULL COMMENT 'Windows 用户名',
+    domain_name VARCHAR(128) NULL COMMENT 'Windows 域',
+    device_id VARCHAR(128) NOT NULL COMMENT '设备唯一标识',
+    computer_name VARCHAR(128) NULL COMMENT '计算机名称',
+    os VARCHAR(64) NULL COMMENT '操作系统',
+    os_version VARCHAR(128) NULL COMMENT '操作系统版本',
+    app_version VARCHAR(32) NULL COMMENT '应用版本',
+    code_hash VARCHAR(128) NOT NULL COMMENT '验证码哈希',
+    verified TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已验证：0=否，1=是',
+    expire_time DATETIME NOT NULL COMMENT '过期时间',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_device_verification_id (verification_id),
+    KEY idx_device_verification_user_device (username, device_id, verified, expire_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='设备验证码表';
