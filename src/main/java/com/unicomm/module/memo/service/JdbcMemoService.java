@@ -16,8 +16,10 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
 import com.unicomm.module.memo.entity.MemoGroupEntity;
+import com.unicomm.module.memo.entity.MemoRelatedUserEntity;
 import com.unicomm.module.memo.mapper.MemoFavoriteMapper;
 import com.unicomm.module.memo.mapper.MemoGroupMapper;
+import com.unicomm.module.memo.mapper.MemoRelatedUserMapper;
 import com.unicomm.module.memo.mapper.MemoTopMapper;
 import com.unicomm.module.memo.realtime.MemoRealtimePublisher;
 import com.unicomm.module.member.dto.MemberSearchResponse;
@@ -68,6 +70,7 @@ public class JdbcMemoService implements MemoService {
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final MemoFavoriteMapper memoFavoriteMapper;
     private final MemoGroupMapper memoGroupMapper;
+    private final MemoRelatedUserMapper memoRelatedUserMapper;
     private final MemoTopMapper memoTopMapper;
     private final MemoRealtimePublisher realtimePublisher;
     private final AuthService authService;
@@ -338,16 +341,7 @@ public class JdbcMemoService implements MemoService {
                         .addValue("deletedTime", LocalDateTime.now())
                         .addValue("updateTime", LocalDateTime.now())
                         .addValue("updateUsername", owner));
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_related_user
-                SET deleted = 1, update_time = :updateTime
-                WHERE memo_id = :id AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", id)
-                        .addValue("owner", owner)
-                        .addValue("updateTime", LocalDateTime.now()));
+        memoRelatedUserMapper.softDeleteByMemoOwner(id, owner, LocalDateTime.now());
         LocalDateTime stateDeletedTime = LocalDateTime.now();
         memoFavoriteMapper.softDeleteByMemoOwner(id, owner, stateDeletedTime);
         memoTopMapper.softDeleteByMemoOwner(id, owner, stateDeletedTime);
@@ -645,36 +639,10 @@ public class JdbcMemoService implements MemoService {
         LocalDateTime now = LocalDateTime.now();
 
         // 先软删除当前关系，再按最新名单恢复或插入。这样客户端只需要提交完整相关人列表。
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_related_user
-                SET deleted = 1, update_time = :updateTime
-                WHERE memo_id = :memoId AND owner_username = :owner
-                """,
-                new MapSqlParameterSource()
-                        .addValue("memoId", memoId)
-                        .addValue("owner", owner)
-                        .addValue("updateTime", now));
+        memoRelatedUserMapper.softDeleteByMemoOwner(memoId, owner, now);
 
         for (Map.Entry<String, String> relatedUser : normalized.entrySet()) {
-            jdbcTemplate.update(
-                    """
-                    INSERT INTO uni_memo_related_user
-                        (memo_id, owner_username, related_username, permission, deleted, create_time, update_time)
-                    VALUES
-                        (:memoId, :owner, :relatedUsername, :permission, 0, :createTime, :updateTime)
-                    ON DUPLICATE KEY UPDATE
-                        permission = VALUES(permission),
-                        deleted = 0,
-                        update_time = VALUES(update_time)
-                    """,
-                    new MapSqlParameterSource()
-                            .addValue("memoId", memoId)
-                            .addValue("owner", owner)
-                            .addValue("relatedUsername", relatedUser.getKey())
-                            .addValue("permission", relatedUser.getValue())
-                            .addValue("createTime", now)
-                            .addValue("updateTime", now));
+            memoRelatedUserMapper.upsertRelatedUser(memoId, owner, relatedUser.getKey(), relatedUser.getValue(), now);
         }
     }
 
@@ -755,15 +723,7 @@ public class JdbcMemoService implements MemoService {
     }
 
     private List<String> relatedUsernames(Long memoId) {
-        return jdbcTemplate.queryForList(
-                """
-                SELECT related_username
-                FROM uni_memo_related_user
-                WHERE memo_id = :memoId AND deleted = 0
-                ORDER BY id ASC
-                """,
-                Map.of("memoId", memoId),
-                String.class);
+        return memoRelatedUserMapper.selectActiveUsernamesByMemoId(memoId);
     }
 
     private boolean isFavorite(Long memoId, String username) {
@@ -862,29 +822,25 @@ public class JdbcMemoService implements MemoService {
     }
 
     private List<MemoRelatedUserResponse> listRelatedUsers(Long memoId) {
-        return jdbcTemplate.query(
-                """
-                SELECT *
-                FROM uni_memo_related_user
-                WHERE memo_id = :memoId AND deleted = 0
-                ORDER BY id ASC
-                """,
-                Map.of("memoId", memoId),
-                (rs, rowNum) -> {
-                    String username = rs.getString("related_username");
-                    MemberSearchResponse member = findMember(username);
-                    return MemoRelatedUserResponse.builder()
-                            .id(rs.getLong("id"))
-                            .username(username)
-                            .employeeNo(member == null ? null : member.getEmployeeNo())
-                            .displayName(member == null ? null : member.getDisplayName())
-                            .departmentName(member == null ? null : member.getDepartmentName())
-                            .email(member == null ? null : member.getEmail())
-                            .permission(rs.getString("permission"))
-                            .createTime(toLocalDateTime(rs, "create_time"))
-                            .updateTime(toLocalDateTime(rs, "update_time"))
-                            .build();
-                });
+        return memoRelatedUserMapper.selectActiveByMemoId(memoId).stream()
+                .map(this::toRelatedUserResponse)
+                .toList();
+    }
+
+    private MemoRelatedUserResponse toRelatedUserResponse(MemoRelatedUserEntity relatedUser) {
+        String username = relatedUser.getRelatedUsername();
+        MemberSearchResponse member = findMember(username);
+        return MemoRelatedUserResponse.builder()
+                .id(relatedUser.getId())
+                .username(username)
+                .employeeNo(member == null ? null : member.getEmployeeNo())
+                .displayName(member == null ? null : member.getDisplayName())
+                .departmentName(member == null ? null : member.getDepartmentName())
+                .email(member == null ? null : member.getEmail())
+                .permission(relatedUser.getPermission())
+                .createTime(relatedUser.getCreateTime())
+                .updateTime(relatedUser.getUpdateTime())
+                .build();
     }
 
     private MemberSearchResponse findMember(String username) {
