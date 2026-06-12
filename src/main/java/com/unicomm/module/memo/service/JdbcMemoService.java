@@ -16,7 +16,9 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
 import com.unicomm.module.memo.entity.MemoGroupEntity;
+import com.unicomm.module.memo.mapper.MemoFavoriteMapper;
 import com.unicomm.module.memo.mapper.MemoGroupMapper;
+import com.unicomm.module.memo.mapper.MemoTopMapper;
 import com.unicomm.module.memo.realtime.MemoRealtimePublisher;
 import com.unicomm.module.member.dto.MemberSearchResponse;
 import lombok.RequiredArgsConstructor;
@@ -64,7 +66,9 @@ public class JdbcMemoService implements MemoService {
     private static final String PERMISSION_VIEW = "view";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
+    private final MemoFavoriteMapper memoFavoriteMapper;
     private final MemoGroupMapper memoGroupMapper;
+    private final MemoTopMapper memoTopMapper;
     private final MemoRealtimePublisher realtimePublisher;
     private final AuthService authService;
 
@@ -344,26 +348,9 @@ public class JdbcMemoService implements MemoService {
                         .addValue("id", id)
                         .addValue("owner", owner)
                         .addValue("updateTime", LocalDateTime.now()));
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_favorite
-                SET deleted = 1, update_time = :updateTime
-                WHERE memo_id = :id AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", id)
-                        .addValue("owner", owner)
-                        .addValue("updateTime", LocalDateTime.now()));
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_top
-                SET deleted = 1, update_time = :updateTime
-                WHERE memo_id = :id AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", id)
-                        .addValue("owner", owner)
-                        .addValue("updateTime", LocalDateTime.now()));
+        LocalDateTime stateDeletedTime = LocalDateTime.now();
+        memoFavoriteMapper.softDeleteByMemoOwner(id, owner, stateDeletedTime);
+        memoTopMapper.softDeleteByMemoOwner(id, owner, stateDeletedTime);
         publishMemoNotification(owner, recipients, "memo.deleted", memo);
         realtimePublisher.publishGroupChanged(owner, "group.updated", null);
     }
@@ -379,24 +366,7 @@ public class JdbcMemoService implements MemoService {
         boolean value = Boolean.TRUE.equals(request.getValue());
         LocalDateTime now = LocalDateTime.now();
         // 置顶是个人视图状态。即使 Memo 是共享的，也只影响当前用户自己的列表排序。
-        jdbcTemplate.update(
-                """
-                INSERT INTO uni_memo_top
-                    (memo_id, username, owner_username, deleted, create_time, update_time)
-                VALUES
-                    (:memoId, :username, :ownerUsername, :deleted, :createTime, :updateTime)
-                ON DUPLICATE KEY UPDATE
-                    deleted = VALUES(deleted),
-                    owner_username = VALUES(owner_username),
-                    update_time = VALUES(update_time)
-                """,
-                new MapSqlParameterSource()
-                        .addValue("memoId", id)
-                        .addValue("username", username)
-                        .addValue("ownerUsername", memo.getOwnerUsername())
-                        .addValue("deleted", value ? 0 : 1)
-                        .addValue("createTime", now)
-                        .addValue("updateTime", now));
+        memoTopMapper.upsertState(id, username, memo.getOwnerUsername(), !value, now);
         return getMemo(id);
     }
 
@@ -411,24 +381,7 @@ public class JdbcMemoService implements MemoService {
         boolean value = Boolean.TRUE.equals(request.getValue());
         LocalDateTime now = LocalDateTime.now();
         // 收藏是个人视图状态。共享 Memo 被某人收藏，不应影响创建人或其他相关人的收藏列表。
-        jdbcTemplate.update(
-                """
-                INSERT INTO uni_memo_favorite
-                    (memo_id, username, owner_username, deleted, create_time, update_time)
-                VALUES
-                    (:memoId, :username, :ownerUsername, :deleted, :createTime, :updateTime)
-                ON DUPLICATE KEY UPDATE
-                    deleted = VALUES(deleted),
-                    owner_username = VALUES(owner_username),
-                    update_time = VALUES(update_time)
-                """,
-                new MapSqlParameterSource()
-                        .addValue("memoId", id)
-                        .addValue("username", username)
-                        .addValue("ownerUsername", memo.getOwnerUsername())
-                        .addValue("deleted", value ? 0 : 1)
-                        .addValue("createTime", now)
-                        .addValue("updateTime", now));
+        memoFavoriteMapper.upsertState(id, username, memo.getOwnerUsername(), !value, now);
         return getMemo(id);
     }
 
@@ -814,17 +767,7 @@ public class JdbcMemoService implements MemoService {
     }
 
     private boolean isFavorite(Long memoId, String username) {
-        Long count = jdbcTemplate.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM uni_memo_favorite
-                WHERE memo_id = :memoId AND username = :username AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("memoId", memoId)
-                        .addValue("username", username),
-                Long.class);
-        return count != null && count > 0;
+        return memoFavoriteMapper.countActiveByMemoAndUser(memoId, username) > 0;
     }
 
     private MemoResponse enrichMemoResponse(MemoResponse memo, String currentUsername) {
