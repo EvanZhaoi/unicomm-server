@@ -17,8 +17,8 @@ public class UserSnapshotService {
     /**
      * 保存或更新当前认证用户的人员快照。
      *
-     * <p>这是第一处迁移到 MyBatis-Plus 的低风险写入逻辑。复杂 Memo 查询暂时继续使用
-     * JdbcTemplate，等权限和分页有更多自动化测试后再拆 Repository。</p>
+     * <p>认证与 Memo 数据访问已统一进入 MyBatis-Plus Mapper 边界。
+     * 这里保留独立服务，是为了后续接入真实人员 API 时集中处理快照同步策略。</p>
      */
     public void saveOrUpdate(EmployeeInfo employee) {
         UserSnapshotEntity entity = new UserSnapshotEntity();

@@ -10,8 +10,8 @@ import org.springframework.context.annotation.Configuration;
 /**
  * MyBatis-Plus 基础配置。
  *
- * <p>当前项目仍保留大量手写 SQL，因为 Memo 列表、权限和聚合查询已经比较复杂。
- * MyBatis-Plus 先用于低风险实体和 Mapper 的迁移，后续按模块逐步替换重复 CRUD。</p>
+ * <p>当前项目把数据库访问统一收敛到 MyBatis-Plus Mapper。
+ * 简单实体使用 BaseMapper，Memo 列表、权限和聚合查询使用 Mapper 上的显式 SQL。</p>
  */
 @Configuration
 @MapperScan("com.unicomm.module.**.mapper")
