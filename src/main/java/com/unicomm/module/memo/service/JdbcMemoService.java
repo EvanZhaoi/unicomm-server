@@ -15,6 +15,8 @@ import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUserResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoRelatedUsersUpdateRequest;
 import com.unicomm.module.memo.dto.MemoDtos.MemoResponse;
 import com.unicomm.module.memo.dto.MemoDtos.MemoUpdateRequest;
+import com.unicomm.module.memo.entity.MemoGroupEntity;
+import com.unicomm.module.memo.mapper.MemoGroupMapper;
 import com.unicomm.module.memo.realtime.MemoRealtimePublisher;
 import com.unicomm.module.member.dto.MemberSearchResponse;
 import lombok.RequiredArgsConstructor;
@@ -43,13 +45,13 @@ import java.util.Set;
 public class JdbcMemoService implements MemoService {
 
     /*
-     * 当前 Memo 模块只保留 MySQL + NamedParameterJdbcTemplate 持久化实现。
+     * 当前 Memo 模块采用 MyBatis-Plus + NamedParameterJdbcTemplate 渐进式持久化实现。
      *
      * 设计约束：
      * 1. Memo 仍有明确 owner_username；列表和详情同时允许 owner 与相关人查看。
      * 2. 删除采用逻辑删除，避免误删后无法恢复，也便于后续做回收站。
      * 3. 写操作完成后发布 WebSocket 事件，桌面端没有刷新按钮，依赖事件触发重新拉取。
-     * 4. 使用 NamedParameterJdbcTemplate 是为了让 SQL 字段和业务含义更直接，当前阶段不引入 ORM。
+     * 4. 分组等简单 CRUD 已迁入 MyBatis-Plus Mapper；Memo 权限、列表和聚合查询先保留显式 SQL。
      * 5. 收藏/置顶是“用户 + Memo”的个人状态，不能写回 Memo 主表，否则多人共享场景会互相影响。
      * 6. 相关人权限由后端最终判断，前端只负责展示只读/可编辑状态，不能作为安全边界。
      */
@@ -62,6 +64,7 @@ public class JdbcMemoService implements MemoService {
     private static final String PERMISSION_VIEW = "view";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
+    private final MemoGroupMapper memoGroupMapper;
     private final MemoRealtimePublisher realtimePublisher;
     private final AuthService authService;
 
@@ -433,19 +436,7 @@ public class JdbcMemoService implements MemoService {
     public List<MemoGroupResponse> listGroups() {
         String owner = currentUsername();
         ensureDefaultGroup(owner);
-        return jdbcTemplate.query(
-                """
-                SELECT g.*,
-                       (SELECT COUNT(*) FROM uni_memo m
-                        WHERE m.owner_username = g.owner_username
-                          AND m.group_id = g.id
-                          AND m.deleted = 0) AS memo_count
-                FROM uni_memo_group g
-                WHERE g.owner_username = :owner AND g.deleted = 0
-                ORDER BY g.sort_order ASC, g.id ASC
-                """,
-                Map.of("owner", owner),
-                groupMapper());
+        return memoGroupMapper.selectGroupsByOwner(owner);
     }
 
     @Override
@@ -455,26 +446,19 @@ public class JdbcMemoService implements MemoService {
         ensureDefaultGroup(owner);
         LocalDateTime now = LocalDateTime.now();
 
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbcTemplate.update(
-                """
-                INSERT INTO uni_memo_group
-                    (owner_username, name, color, icon, sort_order, is_default, deleted, create_time, update_time)
-                VALUES
-                    (:owner, :name, :color, :icon, :sortOrder, 0, 0, :createTime, :updateTime)
-                """,
-                new MapSqlParameterSource()
-                        .addValue("owner", owner)
-                        .addValue("name", request.getName().trim())
-                        .addValue("color", normalizeColor(request.getColor()))
-                        .addValue("icon", normalizeIcon(request.getIcon()))
-                        .addValue("sortOrder", nextSortOrder(owner))
-                        .addValue("createTime", now)
-                        .addValue("updateTime", now),
-                keyHolder,
-                new String[]{"id"});
+        MemoGroupEntity entity = new MemoGroupEntity();
+        entity.setOwnerUsername(owner);
+        entity.setName(request.getName().trim());
+        entity.setColor(normalizeColor(request.getColor()));
+        entity.setIcon(normalizeIcon(request.getIcon()));
+        entity.setSortOrder(nextSortOrder(owner));
+        entity.setIsDefault(false);
+        entity.setDeleted(false);
+        entity.setCreateTime(now);
+        entity.setUpdateTime(now);
+        memoGroupMapper.insert(entity);
 
-        MemoGroupResponse group = requireGroupForOwner(requiredKey(keyHolder), owner);
+        MemoGroupResponse group = requireGroupForOwner(entity.getId(), owner);
         realtimePublisher.publishGroupChanged(owner, "group.created", group.getId());
         return group;
     }
@@ -484,24 +468,14 @@ public class JdbcMemoService implements MemoService {
     public MemoGroupResponse updateGroup(Long id, MemoGroupUpdateRequest request) {
         String owner = currentUsername();
         requireGroupForOwner(id, owner);
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_group
-                SET name = :name,
-                    color = :color,
-                    icon = :icon,
-                    sort_order = COALESCE(:sortOrder, sort_order),
-                    update_time = :updateTime
-                WHERE id = :id AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", id)
-                        .addValue("owner", owner)
-                        .addValue("name", request.getName().trim())
-                        .addValue("color", normalizeColor(request.getColor()))
-                        .addValue("icon", normalizeIcon(request.getIcon()))
-                        .addValue("sortOrder", request.getSortOrder())
-                        .addValue("updateTime", LocalDateTime.now()));
+        memoGroupMapper.updateGroupFields(
+                id,
+                owner,
+                request.getName().trim(),
+                normalizeColor(request.getColor()),
+                normalizeIcon(request.getIcon()),
+                request.getSortOrder(),
+                LocalDateTime.now());
 
         MemoGroupResponse group = requireGroupForOwner(id, owner);
         realtimePublisher.publishGroupChanged(owner, "group.updated", group.getId());
@@ -532,16 +506,7 @@ public class JdbcMemoService implements MemoService {
                         .addValue("owner", owner)
                         .addValue("groupId", group.getId()));
 
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_group
-                SET deleted = 1, update_time = :updateTime
-                WHERE id = :id AND owner_username = :owner AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", id)
-                        .addValue("owner", owner)
-                        .addValue("updateTime", LocalDateTime.now()));
+        memoGroupMapper.softDeleteGroup(id, owner, LocalDateTime.now());
         realtimePublisher.publishGroupChanged(owner, "group.deleted", id);
     }
 
@@ -656,42 +621,16 @@ public class JdbcMemoService implements MemoService {
             throw new BusinessException(ResultCode.BAD_REQUEST, "分组 ID 不能为空");
         }
 
-        List<MemoGroupResponse> list = jdbcTemplate.query(
-                """
-                SELECT g.*,
-                       (SELECT COUNT(*) FROM uni_memo m
-                        WHERE m.owner_username = g.owner_username
-                          AND m.group_id = g.id
-                          AND m.deleted = 0) AS memo_count
-                FROM uni_memo_group g
-                WHERE g.id = :id AND g.owner_username = :owner AND g.deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("id", groupId)
-                        .addValue("owner", owner),
-                groupMapper());
-
-        if (list.isEmpty()) {
+        MemoGroupResponse group = memoGroupMapper.selectGroupByIdForOwner(groupId, owner);
+        if (group == null) {
             throw new BusinessException(ResultCode.BAD_REQUEST, "分组不存在");
         }
-        return list.getFirst();
+        return group;
     }
 
     private synchronized MemoGroupResponse ensureDefaultGroup(String owner) {
         // 默认分组是用户首次使用 Memo 的基础数据。这里采用惰性创建，避免额外初始化流程。
-        List<MemoGroupResponse> exists = jdbcTemplate.query(
-                """
-                SELECT g.*,
-                       (SELECT COUNT(*) FROM uni_memo m
-                        WHERE m.owner_username = g.owner_username
-                          AND m.group_id = g.id
-                          AND m.deleted = 0) AS memo_count
-                FROM uni_memo_group g
-                WHERE g.owner_username = :owner AND g.is_default = 1 AND g.deleted = 0
-                ORDER BY g.id ASC
-                """,
-                Map.of("owner", owner),
-                groupMapper());
+        List<MemoGroupResponse> exists = memoGroupMapper.selectDefaultGroups(owner);
 
         if (!exists.isEmpty()) {
             MemoGroupResponse defaultGroup = exists.getFirst();
@@ -703,25 +642,19 @@ public class JdbcMemoService implements MemoService {
         }
 
         LocalDateTime now = LocalDateTime.now();
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbcTemplate.update(
-                """
-                INSERT INTO uni_memo_group
-                    (owner_username, name, color, icon, sort_order, is_default, deleted, create_time, update_time)
-                VALUES
-                    (:owner, :name, :color, :icon, 0, 1, 0, :createTime, :updateTime)
-                """,
-                new MapSqlParameterSource()
-                        .addValue("owner", owner)
-                        .addValue("name", DEFAULT_GROUP_NAME)
-                        .addValue("color", DEFAULT_GROUP_COLOR)
-                        .addValue("icon", DEFAULT_GROUP_ICON)
-                        .addValue("createTime", now)
-                        .addValue("updateTime", now),
-                keyHolder,
-                new String[]{"id"});
+        MemoGroupEntity entity = new MemoGroupEntity();
+        entity.setOwnerUsername(owner);
+        entity.setName(DEFAULT_GROUP_NAME);
+        entity.setColor(DEFAULT_GROUP_COLOR);
+        entity.setIcon(DEFAULT_GROUP_ICON);
+        entity.setSortOrder(0);
+        entity.setIsDefault(true);
+        entity.setDeleted(false);
+        entity.setCreateTime(now);
+        entity.setUpdateTime(now);
+        memoGroupMapper.insert(entity);
 
-        return requireGroupForOwner(requiredKey(keyHolder), owner);
+        return requireGroupForOwner(entity.getId(), owner);
     }
 
     private void mergeDuplicateDefaultGroups(String owner, MemoGroupResponse defaultGroup, List<MemoGroupResponse> duplicates) {
@@ -745,28 +678,12 @@ public class JdbcMemoService implements MemoService {
                         .addValue("owner", owner)
                         .addValue("duplicateIds", duplicateIds));
 
-        jdbcTemplate.update(
-                """
-                UPDATE uni_memo_group
-                SET is_default = 0, deleted = 1, update_time = :updateTime
-                WHERE owner_username = :owner AND id IN (:duplicateIds) AND deleted = 0
-                """,
-                new MapSqlParameterSource()
-                        .addValue("updateTime", now)
-                        .addValue("owner", owner)
-                        .addValue("duplicateIds", duplicateIds));
+        memoGroupMapper.softDeleteDuplicateDefaults(owner, duplicateIds, now);
     }
 
     private int nextSortOrder(String owner) {
         // sort_order 按 10 递增，后续如果支持拖拽排序，可以在两个相邻值中插入新值。
-        Integer maxSort = jdbcTemplate.queryForObject(
-                """
-                SELECT COALESCE(MAX(sort_order), 0)
-                FROM uni_memo_group
-                WHERE owner_username = :owner AND deleted = 0
-                """,
-                Map.of("owner", owner),
-                Integer.class);
+        Integer maxSort = memoGroupMapper.selectMaxSortOrder(owner);
         return (maxSort == null ? 0 : maxSort) + 10;
     }
 
@@ -1098,21 +1015,6 @@ public class JdbcMemoService implements MemoService {
         } catch (SQLException ignored) {
             return false;
         }
-    }
-
-    private RowMapper<MemoGroupResponse> groupMapper() {
-        // memo_count 来自查询里的子查询别名，调用方无需再次查询分组下 Memo 数量。
-        return (rs, rowNum) -> MemoGroupResponse.builder()
-                .id(rs.getLong("id"))
-                .name(rs.getString("name"))
-                .color(rs.getString("color"))
-                .icon(rs.getString("icon"))
-                .sortOrder(rs.getInt("sort_order"))
-                .isDefault(rs.getBoolean("is_default"))
-                .memoCount(rs.getLong("memo_count"))
-                .createTime(toLocalDateTime(rs, "create_time"))
-                .updateTime(toLocalDateTime(rs, "update_time"))
-                .build();
     }
 
     private LocalDateTime toLocalDateTime(ResultSet rs, String column) throws SQLException {
